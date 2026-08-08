@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ciclo</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#23281B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ciclo">
+
+<link rel="icon" href="icons/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/appletouchicon.png">
+
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="app"></div>
+
+<!--
+  Klassische <script>-Tags ohne "defer"/"type=module": alle Dateien teilen
+  sich einen globalen Scope, spätere Dateien greifen direkt auf Funktionen/
+  Variablen früherer Dateien zu. Die Ladereihenfolge ist deshalb verbindlich
+  und entspricht durchgängig der Nummerierung 01–10 (js/data/app-data.js läuft
+  bewusst unnummeriert davor, da es reine Konstanten ohne Logik enthält).
+-->
+<script src="js/data/app-data.js"></script>
+<script src="js/01-storage.js"></script>
+<script src="js/02-state-theme.js"></script>
+<script src="js/03-utils.js"></script>
+<script src="js/04-calendar.js"></script>
+<script src="js/05-navigation.js"></script>
+<script src="js/06-import.js"></script>
+<script src="js/07-chart.js"></script>
+<script src="js/08-stats-progress.js"></script>
+<script src="js/09-settings.js"></script>
+<script src="js/10-app-init.js"></script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err) => {
+      console.error('Service Worker Registrierung fehlgeschlagen:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>
