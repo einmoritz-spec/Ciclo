@@ -156,7 +156,7 @@ function chartBodyHTML(){
 
   let painCard = '';
   if (State.painDays.size && !isItemHidden('chart-painPhase')){
-    const painStats = computePainPhaseStats(State.periods, Array.from(State.painDays));
+    const painStats = computePainPhaseStats(State.periods, Array.from(State.painDays.keys()));
     const painEntries = Object.entries(painStats.counts).map(([label, value]) => ({ label, value }));
     painCard = `
       <div class="chart-card" data-vis-id="chart-painPhase">

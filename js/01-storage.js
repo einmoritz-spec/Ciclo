@@ -61,11 +61,17 @@ function updatePeriodEntry(periodId, updates) {
   return periods;
 }
 
+/** Lädt die gespeicherten Schmerztage als Array von { date, categories }.
+    Migration für das alte Format (Version ohne Kategorien): dort war jeder
+    Eintrag ein reiner ISO-Datums-String statt eines Objekts — wird hier
+    transparent in { date: <string>, categories: [] } überführt, sodass
+    ältere Backups/Installationen ohne Datenverlust weiterlaufen. */
 function loadPainDays(){
   try {
     const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.PAIN_DAYS);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(entry => typeof entry === 'string' ? { date: entry, categories: [] } : entry);
   } catch (err) {
     console.error('[storage] Schmerztage konnten nicht geladen werden:', err);
     return [];
@@ -83,13 +89,33 @@ function savePainDays(painDays){
 }
 
 /** Schaltet den Schmerztag-Status für ein Datum um (langer Druck auf eine
-    Tageszelle, siehe handleDayLongPress() in 04-calendar.js). */
+    Tageszelle im "Schnell"-Detailgrad, siehe handleDayLongPress() in
+    04-calendar.js) — ohne Kategorie, nur pauschal ja/nein. */
 function togglePainDay(iso){
   const painDays = loadPainDays();
-  const idx = painDays.indexOf(iso);
-  if (idx === -1) painDays.push(iso);
+  const idx = painDays.findIndex(p => p.date === iso);
+  if (idx === -1) painDays.push({ date: iso, categories: [] });
   else painDays.splice(idx, 1);
-  painDays.sort();
+  painDays.sort((a, b) => a.date.localeCompare(b.date));
+  savePainDays(painDays);
+  return painDays;
+}
+
+/** Setzt die Schmerz-Kategorien für ein Datum (Detailgrad "Detailliert", siehe
+    openPainCategorySheet() in 04-calendar.js). Ein leeres categories-Array
+    entfernt den Eintrag wieder komplett (= kein Schmerztag mehr), sonst wird
+    ein bestehender Eintrag ersetzt bzw. ein neuer angelegt. */
+function setPainCategories(iso, categories){
+  const painDays = loadPainDays();
+  const idx = painDays.findIndex(p => p.date === iso);
+  if (!categories.length){
+    if (idx !== -1) painDays.splice(idx, 1);
+  } else if (idx === -1){
+    painDays.push({ date: iso, categories });
+  } else {
+    painDays[idx] = { date: iso, categories };
+  }
+  painDays.sort((a, b) => a.date.localeCompare(b.date));
   savePainDays(painDays);
   return painDays;
 }

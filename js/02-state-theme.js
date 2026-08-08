@@ -25,16 +25,20 @@ const State = {
 
   // Nutzer-Einstellungen (09-settings.js). colorScheme: 'light' | 'dark' | 'system'.
   // themePreset: id aus APP_DATA.THEME_PRESETS ('sand' | 'wald' | 'ton' | 'stein').
+  // detailLevel: 'quick' | 'detailed' — steuert, ob ein per langem Druck markierter
+  // Schmerztag nur pauschal (quick) oder mit Kategorien aus APP_DATA.PAIN_CATEGORIES
+  // (detailed) erfasst wird, siehe openPainCategorySheet() in 04-calendar.js.
   // hiddenItems: Array von IDs aus APP_DATA.VISIBILITY_ITEMS, die per langem Druck
   // ausgeblendet wurden (siehe hideItem()/showItem() unten).
   // Wird in initApp() (10-app-init.js) mit dem gespeicherten Wert aus loadSettings()
   // überschrieben; die Defaults hier gelten nur für Erstinstallationen.
-  settings: { colorScheme: 'system', themePreset: 'wald', hiddenItems: [] },
+  settings: { colorScheme: 'system', themePreset: 'wald', detailLevel: 'quick', hiddenItems: [] },
 
-  // Set von ISO-Daten, die per langem Druck auf eine Tageszelle als Schmerztag
-  // markiert wurden (siehe handleDayLongPress() in 04-calendar.js). Wird in
-  // initApp() aus loadPainDays() befüllt.
-  painDays: new Set()
+  // Map von ISO-Datum -> Kategorien-Array (aus APP_DATA.PAIN_CATEGORIES, leer im
+  // "Schnell"-Detailgrad) für alle per langem Druck auf eine Tageszelle markierten
+  // Schmerztage (siehe handleDayLongPress()/openPainCategorySheet() in 04-calendar.js).
+  // Wird in initApp() aus loadPainDays() befüllt.
+  painDays: new Map()
 };
 
 /**
@@ -161,28 +165,62 @@ function attachLongPress(el, onLongPress, duration){
 }
 
 /** Sucht innerhalb von `root` alle Elemente mit einem data-vis-id-Attribut und
-    hängt attachLongPress() dran: beim Auslösen wird das Element ausgeblendet
-    und ein kurzer Toast als Bestätigung/Hinweis auf die Einstellungen gezeigt,
-    danach rerenderFn() aufgerufen, damit die Karte sofort verschwindet. */
+    hängt attachLongPress() dran: beim Auslösen wird NICHT sofort ausgeblendet,
+    sondern ein Bestätigungs-Toast mit "Ausblenden"-Button gezeigt (showToast()
+    unten) — erst ein zusätzlicher Tap auf den Button blendet die Karte aus und
+    ruft rerenderFn() auf. Ohne Bestätigung (Timeout/ignoriert) bleibt die Karte
+    unverändert sichtbar, damit ein versehentlicher langer Druck nichts auslöst. */
 function wireVisibilityLongPress(root, rerenderFn){
   root.querySelectorAll('[data-vis-id]').forEach(el => {
     attachLongPress(el, () => {
       const id = el.dataset.visId;
-      hideItem(id);
       const item = APP_DATA.VISIBILITY_ITEMS.find(i => i.id === id);
-      showToast((item ? item.label : 'Element') + ' ausgeblendet — in den Einstellungen wieder einblendbar');
-      rerenderFn();
+      const label = item ? item.label : 'Element';
+      showToast(`"${label}" ausblenden?`, {
+        label: 'Ausblenden',
+        onConfirm: () => {
+          hideItem(id);
+          rerenderFn();
+        }
+      });
     });
   });
 }
 
-/** Kurzer, selbst verschwindender Hinweistext unten im Bildschirm (kein Tap zum
-    Wegwischen nötig) — Feedback für Aktionen ohne eigene Ergebnis-Ansicht, wie
-    das Ausblenden per langem Druck oben. */
-function showToast(text){
+/** Kurzer, selbst verschwindender Hinweistext unten im Bildschirm. Ohne `action`
+    reines Feedback (z.B. für zukünftige Meldungen), MIT `action` ein Bestätigungs-
+    Toast mit Button: die eigentliche Wirkung (z.B. Ausblenden) passiert erst bei
+    Tap auf den Button (action.onConfirm), nicht schon beim Long-Press selbst —
+    siehe wireVisibilityLongPress() oben. Bestätigungs-Toasts bleiben länger stehen
+    und sind (anders als reine Hinweis-Toasts) tap-fähig (pointer-events). */
+function showToast(text, action){
   const el = document.createElement('div');
-  el.className = 'visibility-toast';
-  el.textContent = text;
+  el.className = 'visibility-toast' + (action ? ' is-confirm' : '');
+
+  const textEl = document.createElement('span');
+  textEl.className = 'visibility-toast-text';
+  textEl.textContent = text;
+  el.appendChild(textEl);
+
+  let removed = false;
+  const remove = () => {
+    if (removed) return;
+    removed = true;
+    el.remove();
+  };
+
+  if (action){
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'visibility-toast-btn';
+    btn.textContent = action.label;
+    btn.onclick = () => {
+      action.onConfirm();
+      remove();
+    };
+    el.appendChild(btn);
+  }
+
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2600);
+  setTimeout(remove, action ? 4700 : 2600);
 }

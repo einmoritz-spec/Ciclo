@@ -158,6 +158,13 @@ button{
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 24px;
+  /* Verhindert Textauswahl/natives Auswahl-Handle bzw. iOS-Callout-Menü beim
+     langen Drücken auf eine Tageszelle (Schmerztag-Long-Press, siehe
+     wireCalendarDayClicks() in 04-calendar.js) — sonst startet der Browser
+     dort gelegentlich parallel seine eigene Textmarkierung. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .calendar-sentinel-top,
 .calendar-sentinel-bottom{
@@ -241,6 +248,85 @@ button{
   height: 6px;
   border-radius: 50%;
   background: var(--color-pain);
+}
+
+/* ---------- Schmerz-Kategorien-Sheet (Detailgrad "Detailliert", siehe
+   openPainCategorySheet() in 04-calendar.js) ---------- */
+.pain-sheet-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  animation: painSheetBackdropIn 0.18s ease forwards;
+}
+@keyframes painSheetBackdropIn{
+  from{ opacity: 0; }
+  to{ opacity: 1; }
+}
+.pain-sheet{
+  width: 100%;
+  background: var(--color-surface);
+  border-radius: 20px 20px 0 0;
+  padding: 22px 20px calc(20px + var(--safe-bottom));
+  animation: painSheetSlideUp 0.22s ease forwards;
+}
+@keyframes painSheetSlideUp{
+  from{ transform: translateY(24px); opacity: 0; }
+  to{ transform: translateY(0); opacity: 1; }
+}
+.pain-sheet-date{
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.pain-sheet-title{
+  margin: 0 0 16px;
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--color-text-heading);
+}
+.pain-sheet-options{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.pain-sheet-option{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--color-bg);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-heading);
+}
+.pain-sheet-option input{
+  width: 17px;
+  height: 17px;
+  accent-color: var(--color-pain);
+}
+.pain-sheet-actions{
+  display: flex;
+  gap: 10px;
+}
+.pain-sheet-btn{
+  flex: 1 1 0;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--color-pain);
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 15px;
+  text-align: center;
+}
+.pain-sheet-btn--secondary{
+  background: var(--color-bg);
+  color: var(--color-text-heading);
 }
 
 /* ---------- Platzhalter (Chart/Stats) ---------- */
@@ -652,6 +738,10 @@ button{
   left: 50%;
   bottom: calc(78px + var(--safe-bottom));
   transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   background: var(--color-header-bg);
   color: #FFFFFF;
   padding: 10px 18px;
@@ -665,6 +755,26 @@ button{
   opacity: 0;
   pointer-events: none;
   animation: visibilityToastIn 0.2s ease forwards, visibilityToastOut 0.3s ease 2.2s forwards;
+}
+/* Bestätigungs-Variante (mit Button, siehe showToast() in 02-state-theme.js):
+   bleibt länger stehen und ist – anders als der reine Hinweis-Toast – tap-fähig,
+   damit der Button tatsächlich gedrückt werden kann. */
+.visibility-toast.is-confirm{
+  padding-right: 8px;
+  pointer-events: auto;
+  animation: visibilityToastIn 0.2s ease forwards, visibilityToastOut 0.3s ease 4.4s forwards;
+}
+.visibility-toast-text{
+  flex: 1 1 auto;
+}
+.visibility-toast-btn{
+  flex: 0 0 auto;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 800;
 }
 @keyframes visibilityToastIn{
   from{ opacity: 0; transform: translateX(-50%) translateY(8px); }

@@ -24,9 +24,14 @@
       Mitte) bzw. auf eine eintägige Periode -> löscht den gesamten Eintrag
 
    Langer Druck (Pointer-Events, siehe wireCalendarDayClicks()) auf eine Tages-
-   zelle schaltet unabhängig davon einen Schmerztag um (State.painDays,
-   togglePainDay() in 01-storage.js) — rein informativ, beeinflusst keine
-   Perioden-Logik.
+   zelle schaltet unabhängig davon einen Schmerztag um — rein informativ,
+   beeinflusst keine Perioden-Logik. Verhalten hängt vom Detailgrad ab
+   (State.settings.detailLevel, Einstellungen -> Schmerzen):
+   - "quick" (Standard): schaltet den Tag pauschal als Schmerztag um/aus
+     (togglePainDay() in 01-storage.js).
+   - "detailed": öffnet stattdessen ein Bottom-Sheet (openPainCategorySheet()
+     unten) zur Auswahl konkreter Schmerz-Kategorien (APP_DATA.PAIN_CATEGORIES,
+     setPainCategories() in 01-storage.js) statt direkt umzuschalten.
 --------------------------------------------------- */
 
 // Nur Lade-Guards für den Infinite-Scroll, kein Anwendungs-State (der liegt
@@ -173,8 +178,71 @@ function handleDayClick(iso){
 }
 
 function handleDayLongPress(iso){
-  State.painDays = new Set(togglePainDay(iso));
-  refreshDayCellClasses();
+  if (State.settings.detailLevel === 'detailed'){
+    openPainCategorySheet(iso);
+  } else {
+    State.painDays = new Map(togglePainDay(iso).map(p => [p.date, p.categories]));
+    refreshDayCellClasses();
+  }
+}
+
+/** Bottom-Sheet zur Auswahl von Schmerz-Kategorien (APP_DATA.PAIN_CATEGORIES)
+    für ein Datum — nur im Detailgrad "Detailliert" (Einstellungen -> Schmerzen),
+    siehe handleDayLongPress() oben. Liegt außerhalb von #app (wie der Toast in
+    02-state-theme.js), damit ein Re-Render der aktuellen View das Sheet nicht
+    versehentlich mit wegreißt. Tap auf den abgedunkelten Hintergrund bricht
+    ohne Speichern ab; "Kein Schmerztag" entfernt einen evtl. bestehenden
+    Eintrag komplett; "Speichern" übernimmt die aktuell angehakten Kategorien
+    (auch wenn das eine leere Auswahl ist — dann wird der Eintrag beim
+    Speichern ebenfalls entfernt, siehe setPainCategories() in 01-storage.js). */
+function openPainCategorySheet(iso){
+  closePainCategorySheet();
+  const date = parseISODate(iso);
+  const selected = State.painDays.get(iso) || [];
+
+  const optionsHTML = APP_DATA.PAIN_CATEGORIES.map(cat => `
+    <label class="pain-sheet-option">
+      <input type="checkbox" class="pain-sheet-checkbox" value="${cat.id}" ${selected.includes(cat.id) ? 'checked' : ''}>
+      <span>${cat.label}</span>
+    </label>
+  `).join('');
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'pain-sheet-backdrop';
+  backdrop.id = 'painSheetBackdrop';
+  backdrop.innerHTML = `
+    <div class="pain-sheet" role="dialog" aria-modal="true" aria-label="Schmerzen eintragen">
+      <p class="pain-sheet-date">${fmtDateReadable(date)}</p>
+      <p class="pain-sheet-title">Wo tut es weh?</p>
+      <div class="pain-sheet-options">${optionsHTML}</div>
+      <div class="pain-sheet-actions">
+        <button type="button" class="pain-sheet-btn pain-sheet-btn--secondary" id="painSheetRemoveBtn">Kein Schmerztag</button>
+        <button type="button" class="pain-sheet-btn" id="painSheetSaveBtn">Speichern</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closePainCategorySheet();
+  });
+
+  const applyAndClose = (categories) => {
+    State.painDays = new Map(setPainCategories(iso, categories).map(p => [p.date, p.categories]));
+    refreshDayCellClasses();
+    closePainCategorySheet();
+  };
+
+  document.getElementById('painSheetRemoveBtn').onclick = () => applyAndClose([]);
+  document.getElementById('painSheetSaveBtn').onclick = () => {
+    const chosen = Array.from(backdrop.querySelectorAll('.pain-sheet-checkbox:checked')).map(cb => cb.value);
+    applyAndClose(chosen);
+  };
+}
+
+function closePainCategorySheet(){
+  const backdrop = document.getElementById('painSheetBackdrop');
+  if (backdrop) backdrop.remove();
 }
 
 // Ein delegierter Klick-Handler auf dem Monats-Container statt Wiring pro Tageszelle:

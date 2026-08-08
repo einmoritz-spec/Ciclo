@@ -6,10 +6,11 @@
 --------------------------------------------------- */
 function initApp(){
   State.periods = loadPeriods();
-  State.painDays = new Set(loadPainDays());
+  State.painDays = new Map(loadPainDays().map(p => [p.date, p.categories]));
   State.settings = { ...State.settings, ...loadSettings() };
   if (!Array.isArray(State.settings.hiddenItems)) State.settings.hiddenItems = [];
   if (!State.settings.themePreset) State.settings.themePreset = APP_DATA.DEFAULT_THEME_PRESET_ID;
+  if (!State.settings.detailLevel) State.settings.detailLevel = 'quick';
   // Setzt Hell/Dunkel UND wendet direkt den passenden Variablensatz des
   // gespeicherten Farbthemas an (reapplyThemePresetVars() in 02-state-theme.js) —
   // ein separater applyThemeVars(loadThemeOverrides())-Aufruf ist dadurch nicht

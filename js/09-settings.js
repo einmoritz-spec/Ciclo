@@ -23,6 +23,10 @@ function colorSchemeOptionHTML(value, label, current){
   return `<button type="button" class="settings-pill${value === current ? ' is-active' : ''}" data-scheme="${value}">${label}</button>`;
 }
 
+function detailLevelOptionHTML(value, label, current){
+  return `<button type="button" class="settings-pill${value === current ? ' is-active' : ''}" data-detail-level="${value}">${label}</button>`;
+}
+
 /** Eine Zeile in der Farbthema-Liste: 3-Streifen-Vorschau (aus preset.swatch),
     Themenname und ein Häkchen, das nur beim aktiven Thema sichtbar ist (siehe
     .theme-preset-row.is-active in css/styles.css). */
@@ -67,6 +71,7 @@ function settingsContentHTML(){
   const settings = loadSettings();
   const currentScheme = settings.colorScheme || 'system';
   const currentPreset = settings.themePreset || APP_DATA.DEFAULT_THEME_PRESET_ID;
+  const currentDetailLevel = settings.detailLevel || 'quick';
   const { fromISO, toISO } = defaultReportRange();
 
   return `
@@ -82,6 +87,18 @@ function settingsContentHTML(){
       <div class="theme-preset-list" id="themePresetList">
         ${APP_DATA.THEME_PRESETS.map(p => themePresetRowHTML(p, currentPreset)).join('')}
       </div>
+    </section>
+
+    <section class="settings-section">
+      <h2 class="settings-heading">Schmerzen</h2>
+      <p class="settings-label">Detailgrad</p>
+      <div class="settings-pill-row" id="detailLevelRow">
+        ${detailLevelOptionHTML('quick', 'Schnell', currentDetailLevel)}
+        ${detailLevelOptionHTML('detailed', 'Detailliert', currentDetailLevel)}
+      </div>
+      <p class="settings-text">${currentDetailLevel === 'detailed'
+        ? 'Ein langer Druck auf einen Kalendertag öffnet eine Auswahl der Schmerzart: Unterleib, Kopfschmerzen, Magenschmerzen, Muskelschmerzen, Rückenschmerzen oder Sonstige.'
+        : 'Ein langer Druck auf einen Kalendertag markiert ihn pauschal als Schmerztag. Im Detailliert-Modus lässt sich zusätzlich die genaue Schmerzart auswählen.'}</p>
     </section>
 
     <section class="settings-section">
@@ -150,10 +167,11 @@ function handleBackupFileSelected(event){
     try {
       importAllData(JSON.parse(String(reader.result)));
       State.periods = loadPeriods();
-      State.painDays = new Set(loadPainDays());
+      State.painDays = new Map(loadPainDays().map(p => [p.date, p.categories]));
       State.settings = { ...State.settings, ...loadSettings() };
       if (!Array.isArray(State.settings.hiddenItems)) State.settings.hiddenItems = [];
       if (!State.settings.themePreset) State.settings.themePreset = APP_DATA.DEFAULT_THEME_PRESET_ID;
+      if (!State.settings.detailLevel) State.settings.detailLevel = 'quick';
       applyColorScheme(State.settings.colorScheme || 'system');
       renderSettingsView();
     } catch (err){
@@ -177,6 +195,12 @@ function handleThemePresetSelect(presetId){
   renderSettingsView();
 }
 
+function handleDetailLevelSelect(level){
+  State.settings.detailLevel = level;
+  saveSettings(State.settings);
+  renderSettingsView();
+}
+
 /** Baut den druckfertigen Berichts-Inhalt für den gewählten Zeitraum. Zyklus-
     längen werden aus dem VOLLSTÄNDIGEN Datensatz berechnet (computeChartData
     über alle Perioden) und erst danach auf den Zeitraum gefiltert, damit ein
@@ -187,7 +211,7 @@ function buildReportHTML(fromISO, toISO){
   const inRange = e => e.start >= fromISO && e.start <= toISO;
   const rangePeriodLengths = periodLengths.filter(inRange);
   const rangeCycleLengths = cycleLengths.filter(inRange);
-  const rangePainDays = Array.from(State.painDays).filter(iso => iso >= fromISO && iso <= toISO).sort();
+  const rangePainDays = Array.from(State.painDays.keys()).filter(iso => iso >= fromISO && iso <= toISO).sort();
   const rangePeriods = [...State.periods]
     .filter(p => p.start >= fromISO && p.start <= toISO)
     .sort((a, b) => a.start.localeCompare(b.start));
@@ -297,6 +321,9 @@ function wireSettingsView(){
   });
   document.querySelectorAll('#themePresetList .theme-preset-row').forEach(btn => {
     btn.onclick = () => handleThemePresetSelect(btn.dataset.themePreset);
+  });
+  document.querySelectorAll('#detailLevelRow .settings-pill').forEach(btn => {
+    btn.onclick = () => handleDetailLevelSelect(btn.dataset.detailLevel);
   });
   document.getElementById('exportBtn').onclick = handleExportClick;
   document.getElementById('importBackupInput').onchange = handleBackupFileSelected;

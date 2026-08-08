@@ -51,6 +51,19 @@ const APP_DATA = {
   // NICHT verändert werden, nur weil sich der Default ändert.
   DEFAULT_THEME_PRESET_ID: 'wald',
 
+  // Feingranulare Schmerz-Kategorien für den "Detailliert"-Modus (Einstellungen
+  // -> Detailgrad, siehe State.settings.detailLevel). Im "Schnell"-Modus wird
+  // ein Schmerztag weiterhin nur pauschal markiert (leeres categories-Array im
+  // Storage-Eintrag, siehe setPainCategories()/togglePainDay() in 01-storage.js).
+  PAIN_CATEGORIES: [
+    { id: 'unterleib', label: 'Unterleib' },
+    { id: 'kopf', label: 'Kopfschmerzen' },
+    { id: 'magen', label: 'Magenschmerzen' },
+    { id: 'muskeln', label: 'Muskelschmerzen' },
+    { id: 'ruecken', label: 'Rückenschmerzen' },
+    { id: 'sonstige', label: 'Sonstige' }
+  ],
+
   // Vollständige Farbthemen für die "Farbthema"-Auswahl in 09-settings.js
   // (ersetzt die frühere einzelne Akzentfarben-Auswahl). Jedes Thema liefert
   // ZWEI komplette Variablensätze — "light" und "dark" — damit der bestehende
@@ -58,7 +71,11 @@ const APP_DATA = {
   // unabhängig vom gewählten Thema weiter funktioniert; reapplyThemePresetVars()
   // wählt je nach aufgelöstem Farbschema den passenden Satz. "swatch" sind die
   // drei Vorschau-Streifen in der Themen-Zeile (Akzent/Hintergrund/Header-Ton),
-  // an die "Sand/Wald/Ton/Stein"-Vorlage angelehnt.
+  // an die "Sand/Wald/Ton/Stein"-Vorlage angelehnt. --color-pain ist bewusst je
+  // Thema aus einer eigenen Berry-/Wein-Nuance abgeleitet (nicht überall derselbe
+  // Lila-Ton) und gegen --color-accent/--color-period-* jedes Themas abgesetzt,
+  // damit Schmerztage im Kalender klar erkennbar UND spürbar zum Thema passend
+  // wirken statt einfach nur "mitgefärbt" zu sein.
   THEME_PRESETS: [
     {
       id: 'sand',
@@ -77,7 +94,7 @@ const APP_DATA = {
         '--color-period-bg': '#E8C9AE',
         '--color-period-text': '#7A4A28',
         '--color-predicted-rgb': '196, 108, 58',
-        '--color-pain': '#9A6B8B',
+        '--color-pain': '#A6415A',
         '--color-selecting-outline': '#CC8B49',
         '--color-nav-inactive': '#B4A791'
       },
@@ -94,7 +111,7 @@ const APP_DATA = {
         '--color-period-bg': '#4A3624',
         '--color-period-text': '#E8C9AE',
         '--color-predicted-rgb': '196, 108, 58',
-        '--color-pain': '#B48CA6',
+        '--color-pain': '#E08CA0',
         '--color-selecting-outline': '#CC8B49',
         '--color-nav-inactive': '#6E6353'
       }
@@ -116,7 +133,7 @@ const APP_DATA = {
         '--color-period-bg': '#DFC9A6',
         '--color-period-text': '#6E4A26',
         '--color-predicted-rgb': '166, 84, 58',
-        '--color-pain': '#7C6FA8',
+        '--color-pain': '#8C4F73',
         '--color-selecting-outline': '#5C7A3E',
         '--color-nav-inactive': '#A3AC95'
       },
@@ -133,7 +150,7 @@ const APP_DATA = {
         '--color-period-bg': '#3F311E',
         '--color-period-text': '#E3C9A0',
         '--color-predicted-rgb': '166, 84, 58',
-        '--color-pain': '#9689C9',
+        '--color-pain': '#C98FB0',
         '--color-selecting-outline': '#7C9E5C',
         '--color-nav-inactive': '#5D6650'
       }
@@ -155,7 +172,7 @@ const APP_DATA = {
         '--color-period-bg': '#EAC2AE',
         '--color-period-text': '#7A3320',
         '--color-predicted-rgb': '180, 96, 63',
-        '--color-pain': '#7E6F9E',
+        '--color-pain': '#5B4B8A',
         '--color-selecting-outline': '#B4603F',
         '--color-nav-inactive': '#C2A99C'
       },
@@ -172,7 +189,7 @@ const APP_DATA = {
         '--color-period-bg': '#4A2A1F',
         '--color-period-text': '#EAC2AE',
         '--color-predicted-rgb': '180, 96, 63',
-        '--color-pain': '#9689BE',
+        '--color-pain': '#A99BDB',
         '--color-selecting-outline': '#C77A54',
         '--color-nav-inactive': '#6B564C'
       }
@@ -194,7 +211,7 @@ const APP_DATA = {
         '--color-period-bg': '#DCC9BE',
         '--color-period-text': '#6B4A3E',
         '--color-predicted-rgb': '150, 90, 70',
-        '--color-pain': '#7C7398',
+        '--color-pain': '#7A4B63',
         '--color-selecting-outline': '#8C7F63',
         '--color-nav-inactive': '#B3ABA0'
       },
@@ -211,7 +228,7 @@ const APP_DATA = {
         '--color-period-bg': '#3E322C',
         '--color-period-text': '#DCC9BE',
         '--color-predicted-rgb': '150, 90, 70',
-        '--color-pain': '#948BA8',
+        '--color-pain': '#C79BB0',
         '--color-selecting-outline': '#A79A7D',
         '--color-nav-inactive': '#5C574E'
       }
