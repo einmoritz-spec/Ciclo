@@ -27,19 +27,38 @@ const State = {
   // themePreset: id aus APP_DATA.THEME_PRESETS ('sand' | 'wald' | 'ton' | 'stein').
   // detailLevel: 'quick' | 'detailed' — steuert, ob ein per langem Druck markierter
   // Schmerztag nur pauschal (quick) oder mit Kategorien aus APP_DATA.PAIN_CATEGORIES
-  // (detailed) erfasst wird, siehe openPainCategorySheet() in 04-calendar.js.
+  // (detailed) erfasst wird, siehe openDayDetailSheet() in 04-calendar.js.
   // hiddenItems: Array von IDs aus APP_DATA.VISIBILITY_ITEMS, die per langem Druck
   // ausgeblendet wurden (siehe hideItem()/showItem() unten).
   // Wird in initApp() (10-app-init.js) mit dem gespeicherten Wert aus loadSettings()
   // überschrieben; die Defaults hier gelten nur für Erstinstallationen.
   settings: { colorScheme: 'system', themePreset: 'wald', detailLevel: 'quick', hiddenItems: [] },
 
-  // Map von ISO-Datum -> Kategorien-Array (aus APP_DATA.PAIN_CATEGORIES, leer im
-  // "Schnell"-Detailgrad) für alle per langem Druck auf eine Tageszelle markierten
-  // Schmerztage (siehe handleDayLongPress()/openPainCategorySheet() in 04-calendar.js).
-  // Wird in initApp() aus loadPainDays() befüllt.
-  painDays: new Map()
+  // Map von ISO-Datum -> Tages-Log ({ date, pain: [...], symptoms: [...], moods: [...] }),
+  // befüllt in initApp() aus loadDayLogs() (01-storage.js). pain ist ein Array,
+  // da ein Tag mehrere Schmerz-Einträge (je mit Kategorie/Intensität/Tageszeit)
+  // haben kann; im "Schnell"-Detailgrad enthält es höchstens einen generischen
+  // Eintrag ohne Kategorie/Intensität. symptoms/moods sind Arrays von IDs aus
+  // APP_DATA.SYMPTOM_CATEGORIES/MOOD_CATEGORIES bzw. State.customItems — beide
+  // nur im Detailgrad "Detailliert" befüllbar (siehe openDayDetailSheet() in
+  // 04-calendar.js).
+  dayLogs: new Map(),
+
+  // Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (siehe
+  // addCustomSymptom()/addCustomMood() in 01-storage.js), ergänzen die festen
+  // Listen aus APP_DATA. Befüllt in initApp() aus loadCustomItems().
+  customItems: { symptoms: [], moods: [] }
 };
+
+/** Volle Symptom-/Stimmungs-Liste (feste Katalog-Einträge + eigene, per
+    "+ Eigenes" ergänzte Chips) — einzige Quelle für Sheet-Anzeige UND
+    Label-Auflösung in den Statistiken (08-stats-progress.js/07-chart.js). */
+function symptomCatalog(){
+  return APP_DATA.SYMPTOM_CATEGORIES.concat(State.customItems.symptoms || []);
+}
+function moodCatalog(){
+  return APP_DATA.MOOD_CATEGORIES.concat(State.customItems.moods || []);
+}
 
 /**
  * Setzt Hell/Dunkel über ein data-Attribut auf <html> — die dunklen Varianten der

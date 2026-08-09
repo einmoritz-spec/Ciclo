@@ -61,63 +61,187 @@ function updatePeriodEntry(periodId, updates) {
   return periods;
 }
 
-/** Lädt die gespeicherten Schmerztage als Array von { date, categories }.
-    Migration für das alte Format (Version ohne Kategorien): dort war jeder
-    Eintrag ein reiner ISO-Datums-String statt eines Objekts — wird hier
-    transparent in { date: <string>, categories: [] } überführt, sodass
-    ältere Backups/Installationen ohne Datenverlust weiterlaufen. */
-function loadPainDays(){
+function generateEntryId(prefix){
+  return (prefix || 'e') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+/** Liest NUR den alten Schmerztage-Key (Version vor den Tages-Logs). Wird
+    ausschließlich einmalig von loadDayLogs() für die Migration verwendet —
+    kein anderer Code darf mehr direkt darauf zugreifen. Deckt beide früheren
+    Formate ab: reine ISO-Strings (sehr alte Version) und { date, categories }. */
+function _loadLegacyPainDays(){
   try {
     const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.PAIN_DAYS);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed.map(entry => typeof entry === 'string' ? { date: entry, categories: [] } : entry);
   } catch (err) {
-    console.error('[storage] Schmerztage konnten nicht geladen werden:', err);
+    console.error('[storage] Alte Schmerztage konnten nicht gelesen werden:', err);
     return [];
   }
 }
 
-function savePainDays(painDays){
+/** Leerer Tages-Log als Ausgangspunkt für getDayEntry()/upsertDayEntry(). */
+function emptyDayEntry(iso){
+  return { date: iso, pain: [], symptoms: [], moods: [] };
+}
+
+/** Lädt alle Tages-Logs (Schmerz-Einträge + Symptome + Stimmungen je Datum,
+    aufsteigend nach Datum sortiert). Beim allerersten Aufruf nach einem Update
+    wird transparent aus dem alten reinen Schmerztage-Format migriert: ein
+    Eintrag ohne Kategorien wird zu einem generischen Schmerz-Eintrag (wie ihn
+    der "Schnell"-Modus weiterhin anlegt), jede vorhandene Kategorie wird ein
+    eigener Schmerz-Eintrag ohne Intensität/Tageszeit (die es im alten Format
+    nicht gab). Das Ergebnis wird sofort im neuen Format gespeichert, sodass
+    die Migration nur einmal läuft. */
+function loadDayLogs(){
   try {
-    localStorage.setItem(APP_DATA.STORAGE_KEYS.PAIN_DAYS, JSON.stringify(painDays));
+    const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.DAY_LOGS);
+    if (raw){
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (err) {
+    console.error('[storage] Tages-Logs konnten nicht geladen werden:', err);
+    return [];
+  }
+
+  // Kein neuer Key vorhanden -> aus dem alten Schmerztage-Format migrieren.
+  const legacy = _loadLegacyPainDays();
+  if (!legacy.length) return [];
+
+  const migrated = legacy.map(old => {
+    const categories = Array.isArray(old.categories) ? old.categories : [];
+    const pain = categories.length
+      ? categories.map(cat => ({ id: generateEntryId('p'), category: cat, intensity: null, timeOfDay: null }))
+      : [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null }];
+    return { date: old.date, pain, symptoms: [], moods: [] };
+  });
+  migrated.sort((a, b) => a.date.localeCompare(b.date));
+  saveDayLogs(migrated);
+  return migrated;
+}
+
+function saveDayLogs(dayLogs){
+  try {
+    localStorage.setItem(APP_DATA.STORAGE_KEYS.DAY_LOGS, JSON.stringify(dayLogs));
     return true;
   } catch (err) {
-    console.error('[storage] Schmerztage konnten nicht gespeichert werden:', err);
+    console.error('[storage] Tages-Logs konnten nicht gespeichert werden:', err);
     return false;
   }
 }
 
-/** Schaltet den Schmerztag-Status für ein Datum um (langer Druck auf eine
-    Tageszelle im "Schnell"-Detailgrad, siehe handleDayLongPress() in
-    04-calendar.js) — ohne Kategorie, nur pauschal ja/nein. */
-function togglePainDay(iso){
-  const painDays = loadPainDays();
-  const idx = painDays.findIndex(p => p.date === iso);
-  if (idx === -1) painDays.push({ date: iso, categories: [] });
-  else painDays.splice(idx, 1);
-  painDays.sort((a, b) => a.date.localeCompare(b.date));
-  savePainDays(painDays);
-  return painDays;
+/** Liest oder erstellt (nur im Rückgabewert, noch nicht gespeichert) den
+    Tages-Log für ein Datum aus einer bereits geladenen Liste. */
+function findDayEntry(dayLogs, iso){
+  return dayLogs.find(e => e.date === iso) || null;
 }
 
-/** Setzt die Schmerz-Kategorien für ein Datum (Detailgrad "Detailliert", siehe
-    openPainCategorySheet() in 04-calendar.js). Ein leeres categories-Array
-    entfernt den Eintrag wieder komplett (= kein Schmerztag mehr), sonst wird
-    ein bestehender Eintrag ersetzt bzw. ein neuer angelegt. */
-function setPainCategories(iso, categories){
-  const painDays = loadPainDays();
-  const idx = painDays.findIndex(p => p.date === iso);
-  if (!categories.length){
-    if (idx !== -1) painDays.splice(idx, 1);
-  } else if (idx === -1){
-    painDays.push({ date: iso, categories });
-  } else {
-    painDays[idx] = { date: iso, categories };
+/** Wendet `mutate` auf den (ggf. neu angelegten) Tages-Log für `iso` an,
+    entfernt den Eintrag wieder komplett, falls er danach in allen drei
+    Bereichen leer ist (kein toter Datensatz für einen Tag ohne Daten), und
+    persistiert das Ergebnis. Zentrale Schreib-Funktion für alle Änderungen an
+    Schmerz/Symptomen/Stimmungen. */
+function upsertDayEntry(iso, mutate){
+  const dayLogs = loadDayLogs();
+  let entry = findDayEntry(dayLogs, iso);
+  const isNew = !entry;
+  if (!entry) entry = emptyDayEntry(iso);
+  mutate(entry);
+
+  const isEmpty = !entry.pain.length && !entry.symptoms.length && !entry.moods.length;
+  const idx = dayLogs.findIndex(e => e.date === iso);
+  if (isEmpty){
+    if (idx !== -1) dayLogs.splice(idx, 1);
+  } else if (idx !== -1){
+    dayLogs[idx] = entry;
+  } else if (isNew){
+    dayLogs.push(entry);
   }
-  painDays.sort((a, b) => a.date.localeCompare(b.date));
-  savePainDays(painDays);
-  return painDays;
+  dayLogs.sort((a, b) => a.date.localeCompare(b.date));
+  saveDayLogs(dayLogs);
+  return dayLogs;
+}
+
+/** "Schnell"-Modus: schaltet EINEN generischen Schmerz-Eintrag (ohne Kategorie/
+    Intensität/Tageszeit) für das Datum um — unabhängig von evtl. bereits im
+    Detailgrad "Detailliert" erfassten Symptomen/Stimmungen an diesem Tag, die
+    bleiben unangetastet. Sind bereits (egal welche) Schmerz-Einträge vorhanden,
+    werden beim Umschalten ALLE entfernt; sonst wird der eine generische Eintrag
+    angelegt. */
+function togglePainDayQuick(iso){
+  return upsertDayEntry(iso, entry => {
+    if (entry.pain.length) entry.pain = [];
+    else entry.pain = [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null }];
+  });
+}
+
+/** Fügt einen einzelnen Schmerz-Eintrag hinzu (Detailgrad "Detailliert", siehe
+    openDayDetailSheet() in 04-calendar.js) — ein Tag kann mehrere davon haben. */
+function addPainEntry(iso, { category, intensity, timeOfDay }){
+  return upsertDayEntry(iso, entry => {
+    entry.pain.push({ id: generateEntryId('p'), category: category || null, intensity: intensity ?? null, timeOfDay: timeOfDay || null });
+  });
+}
+
+function removePainEntry(iso, entryId){
+  return upsertDayEntry(iso, entry => {
+    entry.pain = entry.pain.filter(p => p.id !== entryId);
+  });
+}
+
+/** Ersetzt die komplette Symptom-Auswahl eines Tages (Mehrfachauswahl-Chips). */
+function setDaySymptoms(iso, symptomIds){
+  return upsertDayEntry(iso, entry => { entry.symptoms = symptomIds; });
+}
+
+/** Ersetzt die komplette Stimmungs-Auswahl eines Tages. */
+function setDayMoods(iso, moodIds){
+  return upsertDayEntry(iso, entry => { entry.moods = moodIds; });
+}
+
+/** Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (Detailgrad
+    "Detailliert" -> "+ Eigenes"), ergänzen die feste Liste aus
+    APP_DATA.SYMPTOM_CATEGORIES / APP_DATA.MOOD_CATEGORIES dauerhaft. */
+function loadCustomItems(){
+  try {
+    const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.CUSTOM_ITEMS);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      symptoms: Array.isArray(parsed.symptoms) ? parsed.symptoms : [],
+      moods: Array.isArray(parsed.moods) ? parsed.moods : []
+    };
+  } catch (err) {
+    console.error('[storage] Eigene Einträge konnten nicht geladen werden:', err);
+    return { symptoms: [], moods: [] };
+  }
+}
+
+function saveCustomItems(customItems){
+  try {
+    localStorage.setItem(APP_DATA.STORAGE_KEYS.CUSTOM_ITEMS, JSON.stringify(customItems));
+    return true;
+  } catch (err) {
+    console.error('[storage] Eigene Einträge konnten nicht gespeichert werden:', err);
+    return false;
+  }
+}
+
+function addCustomSymptom(label){
+  const customItems = loadCustomItems();
+  const item = { id: generateEntryId('cs'), label: label.trim() };
+  customItems.symptoms.push(item);
+  saveCustomItems(customItems);
+  return { customItems, item };
+}
+
+function addCustomMood(label){
+  const customItems = loadCustomItems();
+  const item = { id: generateEntryId('cm'), label: label.trim() };
+  customItems.moods.push(item);
+  saveCustomItems(customItems);
+  return { customItems, item };
 }
 
 function loadThemeOverrides() {
@@ -171,10 +295,14 @@ function exportAllData() {
     periods: loadPeriods(),
     theme: loadThemeOverrides(),
     settings: loadSettings(),
-    painDays: loadPainDays()
+    dayLogs: loadDayLogs(),
+    customItems: loadCustomItems()
   };
 }
 
+/** Importiert ein Backup. Unterstützt sowohl das aktuelle Format (dayLogs)
+    als auch ältere Backups (painDays) — letztere werden über dieselbe
+    Migrations-Logik wie loadDayLogs() in das aktuelle Format überführt. */
 function importAllData(data) {
   if (!data || !Array.isArray(data.periods)) {
     throw new Error('Ungültiges Backup-Format.');
@@ -182,6 +310,21 @@ function importAllData(data) {
   savePeriods(data.periods);
   if (data.theme) saveThemeOverrides(data.theme);
   if (data.settings) saveSettings(data.settings);
-  if (Array.isArray(data.painDays)) savePainDays(data.painDays);
+  if (Array.isArray(data.dayLogs)){
+    saveDayLogs(data.dayLogs);
+  } else if (Array.isArray(data.painDays)){
+    const migrated = data.painDays.map(old => {
+      const categories = Array.isArray(old.categories) ? old.categories : [];
+      const pain = categories.length
+        ? categories.map(cat => ({ id: generateEntryId('p'), category: cat, intensity: null, timeOfDay: null }))
+        : [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null }];
+      return { date: old.date, pain, symptoms: [], moods: [] };
+    });
+    saveDayLogs(migrated);
+  }
+  if (data.customItems) saveCustomItems({
+    symptoms: Array.isArray(data.customItems.symptoms) ? data.customItems.symptoms : [],
+    moods: Array.isArray(data.customItems.moods) ? data.customItems.moods : []
+  });
   return true;
 }

@@ -97,8 +97,8 @@ function settingsContentHTML(){
         ${detailLevelOptionHTML('detailed', 'Detailliert', currentDetailLevel)}
       </div>
       <p class="settings-text">${currentDetailLevel === 'detailed'
-        ? 'Ein langer Druck auf einen Kalendertag öffnet eine Auswahl der Schmerzart: Unterleib, Kopfschmerzen, Magenschmerzen, Muskelschmerzen, Rückenschmerzen oder Sonstige.'
-        : 'Ein langer Druck auf einen Kalendertag markiert ihn pauschal als Schmerztag. Im Detailliert-Modus lässt sich zusätzlich die genaue Schmerzart auswählen.'}</p>
+        ? 'Ein langer Druck auf einen Kalendertag öffnet ein Sheet für Schmerzen (Art, Intensität 1–10, Tageszeit — mehrere pro Tag möglich), Symptome (z.B. Licht-/Geruchsempfindlichkeit) und Stimmung (z.B. gereizt, gestresst) — inkl. eigener, ergänzbarer Einträge.'
+        : 'Ein langer Druck auf einen Kalendertag markiert ihn pauschal als Schmerztag. Im Detailliert-Modus lassen sich zusätzlich Schmerzart/-stärke/-zeitpunkt, Symptome und Stimmung erfassen.'}</p>
     </section>
 
     <section class="settings-section">
@@ -167,7 +167,8 @@ function handleBackupFileSelected(event){
     try {
       importAllData(JSON.parse(String(reader.result)));
       State.periods = loadPeriods();
-      State.painDays = new Map(loadPainDays().map(p => [p.date, p.categories]));
+      State.dayLogs = new Map(loadDayLogs().map(e => [e.date, e]));
+      State.customItems = loadCustomItems();
       State.settings = { ...State.settings, ...loadSettings() };
       if (!Array.isArray(State.settings.hiddenItems)) State.settings.hiddenItems = [];
       if (!State.settings.themePreset) State.settings.themePreset = APP_DATA.DEFAULT_THEME_PRESET_ID;
@@ -211,7 +212,7 @@ function buildReportHTML(fromISO, toISO){
   const inRange = e => e.start >= fromISO && e.start <= toISO;
   const rangePeriodLengths = periodLengths.filter(inRange);
   const rangeCycleLengths = cycleLengths.filter(inRange);
-  const rangePainDays = Array.from(State.painDays.keys()).filter(iso => iso >= fromISO && iso <= toISO).sort();
+  const rangeDayLogs = Array.from(State.dayLogs.values()).filter(e => e.date >= fromISO && e.date <= toISO);
   const rangePeriods = [...State.periods]
     .filter(p => p.start >= fromISO && p.start <= toISO)
     .sort((a, b) => a.start.localeCompare(b.start));
@@ -227,13 +228,35 @@ function buildReportHTML(fromISO, toISO){
     ? barChartSVG(rangeCycleLengths.map(c => ({ label: fmtDateShort(parseISODate(c.start)), value: c.length })), '--color-accent', avgCycle)
     : '<p>Braucht mindestens zwei Periodenstarts im Zeitraum.</p>';
 
+  const rangePainStats = computePainStats(State.periods, rangeDayLogs);
   let painSection = '';
-  if (rangePainDays.length){
-    const painStats = computePainPhaseStats(State.periods, rangePainDays);
-    const painEntries = Object.entries(painStats.counts).map(([label, value]) => ({ label, value }));
+  if (rangePainStats.totalCount){
+    const painPhaseStats = computePhaseOccurrenceStats(State.periods, rangePainStats.entries.map(e => e.iso));
+    const painPhaseEntries = Object.entries(painPhaseStats.counts).map(([label, value]) => ({ label, value }));
+    const timeEntries = APP_DATA.PAIN_TIME_OF_DAY.map(t => ({ label: t.label, value: rangePainStats.byTimeOfDay[t.id] || 0 }));
     painSection = `
-      <h2>Schmerztage nach Zyklusphase</h2>
-      ${categoryBarChartSVG(painEntries, '--color-pain')}
+      <h2>Schmerzen</h2>
+      <ul class="report-summary-list">
+        <li>${rangePainStats.totalCount} Schmerz-Eintrag${rangePainStats.totalCount === 1 ? '' : 'e'} im Zeitraum</li>
+        ${rangePainStats.avgIntensity !== null ? `<li>Ø Intensität: ${fmtDaysAvg(rangePainStats.avgIntensity)}/10</li>` : ''}
+      </ul>
+      <h2>Schmerzen nach Zyklusphase</h2>
+      ${categoryBarChartSVG(painPhaseEntries, '--color-pain')}
+      <h2>Schmerzen nach Tageszeit</h2>
+      ${categoryBarChartSVG(timeEntries, '--color-pain')}
+    `;
+  }
+
+  let symptomMoodSection = '';
+  const symptomCounts = topItemsFromCounts(computeItemFrequency(rangeDayLogs, 'symptoms'), symptomCatalog(), 8);
+  const moodCounts = topItemsFromCounts(computeItemFrequency(rangeDayLogs, 'moods'), moodCatalog(), 8);
+  if (symptomCounts.length || moodCounts.length){
+    symptomMoodSection = `
+      <h2>Symptome &amp; Stimmung</h2>
+      <ul class="report-summary-list">
+        ${symptomCounts.map(s => `<li>${s.label}: ${s.count}x</li>`).join('')}
+        ${moodCounts.map(m => `<li>${m.label}: ${m.count}x</li>`).join('')}
+      </ul>
     `;
   }
 
@@ -254,7 +277,7 @@ function buildReportHTML(fromISO, toISO){
       <li>${rangePeriods.length} erfasste Periode${rangePeriods.length === 1 ? '' : 'n'} im Zeitraum</li>
       <li>Ø Periodendauer: ${avgPeriod !== null ? fmtDaysAvg(avgPeriod) + ' Tage' : 'keine Daten'}</li>
       <li>Ø Zykluslänge: ${avgCycle !== null ? fmtDaysAvg(avgCycle) + ' Tage' : 'keine Daten'}</li>
-      ${rangePainDays.length ? `<li>Schmerztage im Zeitraum: ${rangePainDays.length}</li>` : ''}
+      ${rangePainStats.totalCount ? `<li>Schmerz-Einträge im Zeitraum: ${rangePainStats.totalCount}</li>` : ''}
     </ul>
 
     <h2>Periodendauer</h2>
@@ -264,6 +287,8 @@ function buildReportHTML(fromISO, toISO){
     ${cycleChart}
 
     ${painSection}
+
+    ${symptomMoodSection}
 
     <h2>Erfasste Perioden im Zeitraum</h2>
     ${rangePeriods.length ? `

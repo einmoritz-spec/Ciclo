@@ -49,9 +49,17 @@ function regularityDescriptor(score){
   return 'Unregelmäßig';
 }
 
-function statsContentHTML(stats, painDayCount){
-  const cycleDayLabel = 'Zyklustag ' + stats.currentCycleDay;
+/** Formatiert eine Top-Liste (topItemsFromCounts(), 03-utils.js) als kurze,
+    kommagetrennte "Label (n)"-Aufzählung für statsSectionHTML() — bewusst
+    kompakt statt einer eigenen Liste je Eintrag, da es sich um eine
+    einzeilige Stats-Section handelt (wie Letzte/Nächste Periode). */
+function topItemsInlineHTML(items){
+  if (!items.length) return '–';
+  return items.map(i => `${i.label} (${i.count})`).join(', ');
+}
 
+function cycleSectionHTML(stats){
+  const cycleDayLabel = 'Zyklustag ' + stats.currentCycleDay;
   const cycleWord = stats.cycleCount === 1 ? 'Zyklus' : 'Zyklen';
   const excludedNote = stats.excludedCycleCount
     ? ` ${stats.excludedCycleCount} davon vermutlich Erfassungslücke${stats.excludedCycleCount === 1 ? '' : 'n'} und aus dem Durchschnitt ausgeschlossen.`
@@ -90,9 +98,45 @@ function statsContentHTML(stats, painDayCount){
 
     ${statsSectionHTML('stat-ovulation', 'Geschätzter Eisprung', fmtDateReadable(stats.ovulationDate))}
 
-    ${statsSectionHTML('stat-painTotal', 'Schmerztage insgesamt', `${painDayCount} Tag${painDayCount === 1 ? '' : 'e'}`)}
-
     <p class="stats-note">${predictionNote}</p>
+  `;
+}
+
+/** Zweiter Abschnitt: alles rund um im Detailgrad "Detailliert" erfasste
+    Schmerz-Einträge, Symptome und Stimmung (State.dayLogs, siehe
+    02-state-theme.js/01-storage.js). Kommt komplett leer zurück (leerer
+    String), solange noch keinerlei solcher Daten vorliegen — dann macht ein
+    eigener Abschnitts-Titel ohne Inhalt keinen Sinn. */
+function symptomsSectionHTML(){
+  const dayLogsArray = Array.from(State.dayLogs.values());
+  const painStats = computePainStats(State.periods, dayLogsArray);
+  const symptomCounts = topItemsFromCounts(computeItemFrequency(dayLogsArray, 'symptoms'), symptomCatalog(), 3);
+  const moodCounts = topItemsFromCounts(computeItemFrequency(dayLogsArray, 'moods'), moodCatalog(), 3);
+
+  if (!painStats.totalCount && !symptomCounts.length && !moodCounts.length) return '';
+
+  const painTotalHTML = painStats.totalCount
+    ? statsSectionHTML('stat-painTotal', 'Schmerz-Einträge insgesamt', `${painStats.totalCount} Eintrag${painStats.totalCount === 1 ? '' : 'e'}`)
+    : '';
+  const painIntensityHTML = painStats.avgIntensity !== null
+    ? statsSectionHTML('stat-painIntensity', 'Ø Schmerzintensität', `${fmtDaysAvg(painStats.avgIntensity)}/10`)
+    : '';
+  const topSymptomsHTML = symptomCounts.length
+    ? statsSectionHTML('stat-topSymptoms', 'Häufigste Symptome', topItemsInlineHTML(symptomCounts))
+    : '';
+  const topMoodsHTML = moodCounts.length
+    ? statsSectionHTML('stat-topMoods', 'Häufigste Stimmungen', topItemsInlineHTML(moodCounts))
+    : '';
+
+  const anyVisible = painTotalHTML || painIntensityHTML || topSymptomsHTML || topMoodsHTML;
+  if (!anyVisible) return '';
+
+  return `
+    <p class="stats-group-title">Beschwerden</p>
+    ${painTotalHTML}
+    ${painIntensityHTML}
+    ${topSymptomsHTML}
+    ${topMoodsHTML}
   `;
 }
 
@@ -106,7 +150,7 @@ function renderStatsView(){
       <button type="button" class="header-icon-btn" id="settingsBtnStats" aria-label="Einstellungen">${APP_DATA.ICONS.SETTINGS}</button>
     </header>
     <div class="stats-scroll">
-      ${stats.hasData ? statsContentHTML(stats, State.painDays.size) : statsEmptyHTML()}
+      ${stats.hasData ? cycleSectionHTML(stats) + symptomsSectionHTML() : statsEmptyHTML()}
     </div>
     ${bottomNavHTML('stats')}
   `;

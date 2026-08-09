@@ -154,22 +154,72 @@ function chartBodyHTML(){
     cycleCard = '';
   }
 
-  let painCard = '';
-  if (State.painDays.size && !isItemHidden('chart-painPhase')){
-    const painStats = computePainPhaseStats(State.periods, Array.from(State.painDays.keys()));
-    const painEntries = Object.entries(painStats.counts).map(([label, value]) => ({ label, value }));
-    painCard = `
+  const dayLogsArray = Array.from(State.dayLogs.values());
+  const painStats = computePainStats(State.periods, dayLogsArray);
+
+  let painPhaseCard = '';
+  if (painStats.totalCount && !isItemHidden('chart-painPhase')){
+    const painPhaseStats = computePhaseOccurrenceStats(State.periods, painStats.entries.map(e => e.iso));
+    const painPhaseEntries = Object.entries(painPhaseStats.counts).map(([label, value]) => ({ label, value }));
+    painPhaseCard = `
       <div class="chart-card" data-vis-id="chart-painPhase">
         <div class="chart-card-header">
-          <span class="chart-card-title">Schmerztage nach Zyklusphase</span>
+          <span class="chart-card-title">Schmerzen nach Zyklusphase</span>
         </div>
-        <p class="chart-card-subtitle">Wie oft ein per langem Druck markierter Schmerztag in welche Phase fällt</p>
-        <div class="chart-scroll-x">${categoryBarChartSVG(painEntries, '--color-pain')}</div>
+        <p class="chart-card-subtitle">Wie viele Schmerz-Einträge in welche Phase fallen</p>
+        <div class="chart-scroll-x">${categoryBarChartSVG(painPhaseEntries, '--color-pain')}</div>
       </div>
     `;
   }
 
-  return `<div class="chart-view-scroll">${periodCard}${cycleCard}${painCard}</div>`;
+  let painTimeCard = '';
+  const hasTimeData = Object.values(painStats.byTimeOfDay).some(v => v > 0);
+  if (hasTimeData && !isItemHidden('chart-painTimeOfDay')){
+    const timeEntries = APP_DATA.PAIN_TIME_OF_DAY.map(t => ({ label: t.label, value: painStats.byTimeOfDay[t.id] || 0 }));
+    painTimeCard = `
+      <div class="chart-card" data-vis-id="chart-painTimeOfDay">
+        <div class="chart-card-header">
+          <span class="chart-card-title">Schmerzen nach Tageszeit</span>
+        </div>
+        <p class="chart-card-subtitle">Wann Schmerz-Einträge im Detailgrad "Detailliert" erfasst wurden</p>
+        <div class="chart-scroll-x">${categoryBarChartSVG(timeEntries, '--color-pain')}</div>
+      </div>
+    `;
+  }
+
+  let symptomsPhaseCard = '';
+  const symptomIsoList = flattenFieldOccurrences(dayLogsArray, 'symptoms');
+  if (symptomIsoList.length && !isItemHidden('chart-symptomsByPhase')){
+    const symptomPhaseStats = computePhaseOccurrenceStats(State.periods, symptomIsoList);
+    const symptomPhaseEntries = Object.entries(symptomPhaseStats.counts).map(([label, value]) => ({ label, value }));
+    symptomsPhaseCard = `
+      <div class="chart-card" data-vis-id="chart-symptomsByPhase">
+        <div class="chart-card-header">
+          <span class="chart-card-title">Symptome nach Zyklusphase</span>
+        </div>
+        <p class="chart-card-subtitle">Wie oft erfasste Symptome in welche Phase fallen</p>
+        <div class="chart-scroll-x">${categoryBarChartSVG(symptomPhaseEntries, '--color-accent')}</div>
+      </div>
+    `;
+  }
+
+  let moodsPhaseCard = '';
+  const moodIsoList = flattenFieldOccurrences(dayLogsArray, 'moods');
+  if (moodIsoList.length && !isItemHidden('chart-moodsByPhase')){
+    const moodPhaseStats = computePhaseOccurrenceStats(State.periods, moodIsoList);
+    const moodPhaseEntries = Object.entries(moodPhaseStats.counts).map(([label, value]) => ({ label, value }));
+    moodsPhaseCard = `
+      <div class="chart-card" data-vis-id="chart-moodsByPhase">
+        <div class="chart-card-header">
+          <span class="chart-card-title">Stimmung nach Zyklusphase</span>
+        </div>
+        <p class="chart-card-subtitle">Wie oft erfasste Stimmungen in welche Phase fallen</p>
+        <div class="chart-scroll-x">${categoryBarChartSVG(moodPhaseEntries, '--color-text-heading')}</div>
+      </div>
+    `;
+  }
+
+  return `<div class="chart-view-scroll">${periodCard}${cycleCard}${painPhaseCard}${painTimeCard}${symptomsPhaseCard}${moodsPhaseCard}</div>`;
 }
 
 function renderChartView(){

@@ -24,14 +24,17 @@
       Mitte) bzw. auf eine eintägige Periode -> löscht den gesamten Eintrag
 
    Langer Druck (Pointer-Events, siehe wireCalendarDayClicks()) auf eine Tages-
-   zelle schaltet unabhängig davon einen Schmerztag um — rein informativ,
-   beeinflusst keine Perioden-Logik. Verhalten hängt vom Detailgrad ab
-   (State.settings.detailLevel, Einstellungen -> Schmerzen):
-   - "quick" (Standard): schaltet den Tag pauschal als Schmerztag um/aus
-     (togglePainDay() in 01-storage.js).
-   - "detailed": öffnet stattdessen ein Bottom-Sheet (openPainCategorySheet()
-     unten) zur Auswahl konkreter Schmerz-Kategorien (APP_DATA.PAIN_CATEGORIES,
-     setPainCategories() in 01-storage.js) statt direkt umzuschalten.
+   zelle öffnet unabhängig davon die Tages-Erfassung (Schmerz/Symptome/
+   Stimmung) — rein informativ, beeinflusst keine Perioden-Logik. Verhalten
+   hängt vom Detailgrad ab (State.settings.detailLevel, Einstellungen ->
+   Schmerzen):
+   - "quick" (Standard): schaltet nur einen generischen Schmerztag um/aus
+     (togglePainDayQuick() in 01-storage.js) — kein Zugriff auf Symptome/
+     Stimmung, die gehören ausschließlich zu "detailed".
+   - "detailed": öffnet stattdessen das große Tages-Sheet (openDayDetailSheet()
+     unten) für mehrere Schmerz-Einträge (Kategorie + Intensität 1–10 +
+     Tageszeit, siehe APP_DATA.PAIN_CATEGORIES/PAIN_TIME_OF_DAY), Symptome und
+     Stimmung (APP_DATA.SYMPTOM_CATEGORIES/MOOD_CATEGORIES + eigene Einträge).
 --------------------------------------------------- */
 
 // Nur Lade-Guards für den Infinite-Scroll, kein Anwendungs-State (der liegt
@@ -60,27 +63,76 @@ function computePredictedDaysMap(){
   return map;
 }
 
-/** Vorhersage-Kalender-Klasse für einen Tag: 'is-predicted-peak' (durchgezogener
-    Ring) für den wahrscheinlichsten Tag (intensity === 1), 'is-predicted-range'
-    (gestrichelter Ring) für die übrigen Tage im Fenster — nach Drip-Vorbild.
-    Nur für Tage OHNE bereits eingetragene Periode (has-period hat Vorrang). */
-function predictedDayClass(iso, hasPeriod){
+/** Klassen + "hat bereits eine Periode"-Flag für eine Tageszelle. Getrennt von
+    der eigentlichen HTML-Erzeugung (dayCellHTML() unten), da beide Aufrufer
+    (initialer Aufbau UND refreshDayCells()) dieselbe hasPeriod-Information für
+    den Vorhersage-Ring brauchen. */
+function dayCellMeta(iso, date){
+  const hasPeriod = !!findPeriodForDate(iso);
+  const classes = ['day-cell'];
+  if (isToday(date)) classes.push('is-today');
+  if (hasPeriod) classes.push('has-period');
+  if (State.calendar.selection.start === iso) classes.push('is-selecting');
+  return { hasPeriod, className: classes.join(' ') };
+}
+
+/** Vorhersage-Ring als eigenes kleines SVG (statt CSS-Border): so lässt sich
+    die Strichlänge des gestrichelten Rings frei einstellen (etwas weiter
+    auseinander als ein normaler CSS-"dashed"-Rand) und die Farbe entspricht
+    jetzt bewusst derselben wie an echten Periodentagen oben
+    (var(--color-period-text), statt einer eigenen Vorhersage-Farbe) — der
+    wahrscheinlichste Tag (intensity === 1) bekommt einen durchgezogenen Ring,
+    die übrigen Tage im Fenster einen gestrichelten. Nur für Tage OHNE bereits
+    eingetragene Periode (has-period hat Vorrang, kein Ring dann nötig). */
+function predictedRingHTML(iso, hasPeriod){
   if (hasPeriod) return '';
   const intensity = predictedDaysMap.get(iso);
   if (intensity === undefined) return '';
-  return intensity === 1 ? 'is-predicted-peak' : 'is-predicted-range';
+  const isPeak = intensity === 1;
+  const dashAttr = isPeak ? '' : ' stroke-dasharray="5 6"';
+  return `<svg class="day-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"${dashAttr}></circle></svg>`;
 }
 
-function dayCellClasses(iso, date){
-  const classes = ['day-cell'];
-  if (isToday(date)) classes.push('is-today');
-  const hasPeriod = !!findPeriodForDate(iso);
-  if (hasPeriod) classes.push('has-period');
-  const predictedClass = predictedDayClass(iso, hasPeriod);
-  if (predictedClass) classes.push(predictedClass);
-  if (State.painDays.has(iso)) classes.push('is-pain');
-  if (State.calendar.selection.start === iso) classes.push('is-selecting');
-  return classes.join(' ');
+/** Größe/Deckkraft des Schmerz-Markers richten sich nach der höchsten an
+    diesem Tag erfassten Intensität (1–10) — je stärker, desto größer/kräftiger.
+    Ohne erfasste Intensität (z.B. "Schnell"-Modus oder migrierte alte
+    Schmerztage) wird ein mittelgroßer, gut sichtbarer Standard-Punkt gezeigt,
+    statt gar keine Größenangabe treffen zu können. */
+function painMarkerStyle(entry){
+  const intensities = (entry.pain || []).map(p => p.intensity).filter(v => v != null);
+  if (!intensities.length) return 'width:7px;height:7px;opacity:0.85';
+  const max = Math.max(...intensities);
+  const size = 4 + max * 0.6;
+  const opacity = Math.min(1, 0.35 + max * 0.065);
+  return `width:${size.toFixed(1)}px;height:${size.toFixed(1)}px;opacity:${opacity.toFixed(2)}`;
+}
+
+/** Minimalistische Punkt-Reihe unter der Tageszahl, die auf einen Blick zeigt,
+    WAS an diesem Tag erfasst wurde (Schmerz/Symptome/Stimmung) — ersetzt den
+    früheren einzelnen lila Schmerz-Punkt. Schmerz-Punkt skaliert mit der
+    Intensität (siehe painMarkerStyle()), Symptom-/Stimmungs-Punkt sind bewusst
+    schlicht (nur "vorhanden ja/nein", keine Mengenangabe) um die Zelle nicht zu
+    überladen. */
+function dayMarkersHTML(iso){
+  const entry = State.dayLogs.get(iso);
+  if (!entry) return '';
+  const marks = [];
+  if (entry.pain && entry.pain.length){
+    marks.push(`<span class="day-marker day-marker--pain" style="${painMarkerStyle(entry)}"></span>`);
+  }
+  if (entry.symptoms && entry.symptoms.length){
+    marks.push('<span class="day-marker day-marker--symptom"></span>');
+  }
+  if (entry.moods && entry.moods.length){
+    marks.push('<span class="day-marker day-marker--mood"></span>');
+  }
+  if (!marks.length) return '';
+  return `<span class="day-markers">${marks.join('')}</span>`;
+}
+
+function dayCellHTML(iso, date, day){
+  const meta = dayCellMeta(iso, date);
+  return `<button type="button" class="${meta.className}" data-date="${iso}">${predictedRingHTML(iso, meta.hasPeriod)}<span class="day-num">${day}</span>${dayMarkersHTML(iso)}</button>`;
 }
 
 function monthBlockHTML(year, month0){
@@ -93,7 +145,7 @@ function monthBlockHTML(year, month0){
     const day = i + 1;
     const date = new Date(year, month0, day);
     const iso = formatISODate(date);
-    return `<button type="button" class="${dayCellClasses(iso, date)}" data-date="${iso}">${day}</button>`;
+    return dayCellHTML(iso, date, day);
   }).join('');
 
   return `
@@ -105,14 +157,16 @@ function monthBlockHTML(year, month0){
   `;
 }
 
-/** Aktualisiert nur die Zustands-Klassen bestehender Tageszellen (kein Neuaufbau
-    des HTML) — günstig genug, um nach jedem Klick über ALLE geladenen Monate zu
-    laufen. */
-function refreshDayCellClasses(){
+/** Aktualisiert Klassen UND Inhalt (Vorhersage-Ring + Marker-Punkte) aller
+    bestehenden Tageszellen, ohne die Monate komplett neu aufzubauen — günstig
+    genug, um nach jeder Änderung über ALLE geladenen Monate zu laufen. */
+function refreshDayCells(){
   document.querySelectorAll('#calendarMonths .day-cell[data-date]').forEach(btn => {
     const iso = btn.dataset.date;
     const date = parseISODate(iso);
-    btn.className = dayCellClasses(iso, date);
+    const meta = dayCellMeta(iso, date);
+    btn.className = meta.className;
+    btn.innerHTML = `${predictedRingHTML(iso, meta.hasPeriod)}<span class="day-num">${date.getDate()}</span>${dayMarkersHTML(iso)}`;
   });
 }
 
@@ -174,75 +228,257 @@ function handleDayClick(iso){
   // Perioden können sich geändert haben -> Vorhersage-Fenster neu berechnen, bevor
   // die Zellen aktualisiert werden.
   predictedDaysMap = computePredictedDaysMap();
-  refreshDayCellClasses();
+  refreshDayCells();
 }
 
+/** "Schnell": schaltet nur einen generischen Schmerztag um (wie zuvor).
+    "Detailliert": öffnet das große Tages-Sheet mit Schmerz-Einträgen
+    (Kategorie/Intensität/Tageszeit), Symptomen und Stimmung (siehe
+    openDayDetailSheet() unten) — dort ist auch "Kein Schmerztag" nicht mehr
+    nötig, da einzelne Schmerz-Einträge dort direkt entfernbar sind. */
 function handleDayLongPress(iso){
   if (State.settings.detailLevel === 'detailed'){
-    openPainCategorySheet(iso);
+    openDayDetailSheet(iso);
   } else {
-    State.painDays = new Map(togglePainDay(iso).map(p => [p.date, p.categories]));
-    refreshDayCellClasses();
+    State.dayLogs = new Map(togglePainDayQuick(iso).map(e => [e.date, e]));
+    refreshDayCells();
   }
 }
 
-/** Bottom-Sheet zur Auswahl von Schmerz-Kategorien (APP_DATA.PAIN_CATEGORIES)
-    für ein Datum — nur im Detailgrad "Detailliert" (Einstellungen -> Schmerzen),
-    siehe handleDayLongPress() oben. Liegt außerhalb von #app (wie der Toast in
-    02-state-theme.js), damit ein Re-Render der aktuellen View das Sheet nicht
-    versehentlich mit wegreißt. Tap auf den abgedunkelten Hintergrund bricht
-    ohne Speichern ab; "Kein Schmerztag" entfernt einen evtl. bestehenden
-    Eintrag komplett; "Speichern" übernimmt die aktuell angehakten Kategorien
-    (auch wenn das eine leere Auswahl ist — dann wird der Eintrag beim
-    Speichern ebenfalls entfernt, siehe setPainCategories() in 01-storage.js). */
-function openPainCategorySheet(iso){
-  closePainCategorySheet();
-  const date = parseISODate(iso);
-  const selected = State.painDays.get(iso) || [];
+/** Formatiert einen einzelnen Schmerz-Eintrag für die Liste im Sheet, z.B.
+    "Unterleib · 7/10 · Abends" — fehlende Angaben (Intensität/Tageszeit noch
+    nicht gesetzt, Kategorie im "Schnell"-Modus generisch) werden ausgelassen
+    statt Platzhalter anzuzeigen. */
+function painEntryLabel(entry){
+  const parts = [];
+  const cat = APP_DATA.PAIN_CATEGORIES.find(c => c.id === entry.category);
+  parts.push(cat ? cat.label : 'Allgemein');
+  if (entry.intensity != null) parts.push(`${entry.intensity}/10`);
+  const time = APP_DATA.PAIN_TIME_OF_DAY.find(t => t.id === entry.timeOfDay);
+  if (time) parts.push(time.label);
+  return parts.join(' · ');
+}
 
-  const optionsHTML = APP_DATA.PAIN_CATEGORIES.map(cat => `
-    <label class="pain-sheet-option">
-      <input type="checkbox" class="pain-sheet-checkbox" value="${cat.id}" ${selected.includes(cat.id) ? 'checked' : ''}>
-      <span>${cat.label}</span>
-    </label>
+/** Liste bereits erfasster Schmerz-Einträge des Tages, je Zeile mit ×-Button
+    zum Entfernen (removePainEntry() in 01-storage.js). */
+function painEntryListHTML(entry){
+  if (!entry.pain.length) return '<p class="day-sheet-empty-hint">Noch keine Schmerz-Einträge.</p>';
+  return entry.pain.map(p => `
+    <div class="pain-entry-row" data-entry-id="${p.id}">
+      <span>${painEntryLabel(p)}</span>
+      <button type="button" class="pain-entry-remove" data-remove-id="${p.id}" aria-label="Entfernen">×</button>
+    </div>
   `).join('');
+}
+
+/** Kleines Unterformular zum Anlegen EINES neuen Schmerz-Eintrags: Kategorie
+    (Einfachauswahl-Chips), Intensität (Schieberegler 1–10), Tageszeit
+    (Einfachauswahl-Chips). Wird nur gezeigt, wenn draft nicht null ist (Tap auf
+    "+ Schmerz hinzufügen", siehe wireDaySheet()). */
+function painSubformHTML(draft){
+  if (!draft) return '';
+  const catChips = APP_DATA.PAIN_CATEGORIES.map(c => `
+    <button type="button" class="chip${draft.category === c.id ? ' is-selected' : ''}" data-draft-category="${c.id}">${c.label}</button>
+  `).join('');
+  const timeChips = APP_DATA.PAIN_TIME_OF_DAY.map(t => `
+    <button type="button" class="chip${draft.timeOfDay === t.id ? ' is-selected' : ''}" data-draft-time="${t.id}">${t.label}</button>
+  `).join('');
+  return `
+    <div class="pain-subform" id="painSubform">
+      <p class="pain-subform-label">Wo?</p>
+      <div class="chip-row">${catChips}</div>
+      <p class="pain-subform-label">Wie stark? <strong>${draft.intensity}/10</strong></p>
+      <input type="range" min="1" max="10" step="1" value="${draft.intensity}" class="intensity-slider" id="painDraftIntensity">
+      <p class="pain-subform-label">Wann?</p>
+      <div class="chip-row">${timeChips}</div>
+      <div class="pain-subform-actions">
+        <button type="button" class="pain-sheet-btn pain-sheet-btn--secondary" id="painDraftCancelBtn">Abbrechen</button>
+        <button type="button" class="pain-sheet-btn" id="painDraftAddBtn" ${draft.category ? '' : 'disabled'}>Hinzufügen</button>
+      </div>
+    </div>
+  `;
+}
+
+function chipRowHTML(catalog, selectedIds, dataAttr){
+  return catalog.map(item => `
+    <button type="button" class="chip${selectedIds.includes(item.id) ? ' is-selected' : ''}" data-${dataAttr}="${item.id}">${item.label}</button>
+  `).join('');
+}
+
+// Laufender Entwurf für einen neuen Schmerz-Eintrag im offenen Sheet (null =
+// Unterformular ausgeblendet). Reiner UI-Zwischenstand, nichts davon ist
+// gespeichert, bevor "Hinzufügen" getippt wird.
+let painDraft = null;
+let daySheetISO = null;
+
+/** Baut den kompletten Sheet-Inhalt aus dem AKTUELLEN Tages-Log neu auf (nach
+    jeder Änderung neu gerufen, siehe renderDaySheetContent()) — hält die
+    Anzeige synchron zu State.dayLogs, ohne das ganze Sheet (inkl. Backdrop)
+    neu zu erzeugen. */
+function daySheetBodyHTML(iso){
+  const entry = State.dayLogs.get(iso) || emptyDayEntry(iso);
+  return `
+    <div class="day-sheet-section">
+      <p class="day-sheet-section-title">Schmerzen</p>
+      <div class="pain-entry-list" id="painEntryList">${painEntryListHTML(entry)}</div>
+      ${painDraft ? painSubformHTML(painDraft) : '<button type="button" class="day-sheet-add-btn" id="addPainEntryBtn">+ Schmerz hinzufügen</button>'}
+    </div>
+
+    <div class="day-sheet-section">
+      <p class="day-sheet-section-title">Symptome</p>
+      <div class="chip-row" id="symptomChipRow">${chipRowHTML(symptomCatalog(), entry.symptoms, 'symptom')}</div>
+      <div class="chip-add-row">
+        <input type="text" class="chip-add-input" id="symptomCustomInput" placeholder="Eigenes Symptom …">
+        <button type="button" class="chip-add-btn" id="symptomCustomAddBtn">+</button>
+      </div>
+    </div>
+
+    <div class="day-sheet-section">
+      <p class="day-sheet-section-title">Stimmung</p>
+      <div class="chip-row" id="moodChipRow">${chipRowHTML(moodCatalog(), entry.moods, 'mood')}</div>
+      <div class="chip-add-row">
+        <input type="text" class="chip-add-input" id="moodCustomInput" placeholder="Eigene Stimmung …">
+        <button type="button" class="chip-add-btn" id="moodCustomAddBtn">+</button>
+      </div>
+    </div>
+  `;
+}
+
+/** Baut nur den Sheet-INHALT neu auf (nicht den Backdrop/die Öffnen-Animation)
+    und verdrahtet ihn neu — wird nach jeder Datenänderung aufgerufen, damit
+    z.B. die Schmerz-Liste sofort einen neu hinzugefügten Eintrag zeigt. */
+function renderDaySheetContent(){
+  const body = document.getElementById('daySheetBody');
+  if (!body) return;
+  body.innerHTML = daySheetBodyHTML(daySheetISO);
+  wireDaySheetBody();
+  refreshDayCells();
+}
+
+function wireDaySheetBody(){
+  const addBtn = document.getElementById('addPainEntryBtn');
+  if (addBtn) addBtn.onclick = () => {
+    painDraft = { category: null, intensity: 5, timeOfDay: null };
+    renderDaySheetContent();
+  };
+
+  const cancelBtn = document.getElementById('painDraftCancelBtn');
+  if (cancelBtn) cancelBtn.onclick = () => { painDraft = null; renderDaySheetContent(); };
+
+  document.querySelectorAll('#painSubform [data-draft-category]').forEach(btn => {
+    btn.onclick = () => { painDraft.category = btn.dataset.draftCategory; renderDaySheetContent(); };
+  });
+  document.querySelectorAll('#painSubform [data-draft-time]').forEach(btn => {
+    btn.onclick = () => {
+      painDraft.timeOfDay = painDraft.timeOfDay === btn.dataset.draftTime ? null : btn.dataset.draftTime;
+      renderDaySheetContent();
+    };
+  });
+  const intensityInput = document.getElementById('painDraftIntensity');
+  if (intensityInput) intensityInput.oninput = () => { painDraft.intensity = Number(intensityInput.value); };
+  if (intensityInput) intensityInput.onchange = () => { painDraft.intensity = Number(intensityInput.value); renderDaySheetContent(); };
+
+  const addDraftBtn = document.getElementById('painDraftAddBtn');
+  if (addDraftBtn) addDraftBtn.onclick = () => {
+    if (!painDraft.category) return;
+    State.dayLogs = new Map(addPainEntry(daySheetISO, painDraft).map(e => [e.date, e]));
+    painDraft = null;
+    renderDaySheetContent();
+  };
+
+  document.querySelectorAll('.pain-entry-remove').forEach(btn => {
+    btn.onclick = () => {
+      State.dayLogs = new Map(removePainEntry(daySheetISO, btn.dataset.removeId).map(e => [e.date, e]));
+      renderDaySheetContent();
+    };
+  });
+
+  document.querySelectorAll('#symptomChipRow .chip').forEach(chip => {
+    chip.onclick = () => {
+      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+      const id = chip.dataset.symptom;
+      const next = entry.symptoms.includes(id) ? entry.symptoms.filter(s => s !== id) : [...entry.symptoms, id];
+      State.dayLogs = new Map(setDaySymptoms(daySheetISO, next).map(e => [e.date, e]));
+      renderDaySheetContent();
+    };
+  });
+  document.querySelectorAll('#moodChipRow .chip').forEach(chip => {
+    chip.onclick = () => {
+      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+      const id = chip.dataset.mood;
+      const next = entry.moods.includes(id) ? entry.moods.filter(m => m !== id) : [...entry.moods, id];
+      State.dayLogs = new Map(setDayMoods(daySheetISO, next).map(e => [e.date, e]));
+      renderDaySheetContent();
+    };
+  });
+
+  const addSymptomBtn = document.getElementById('symptomCustomAddBtn');
+  const symptomInput = document.getElementById('symptomCustomInput');
+  if (addSymptomBtn) addSymptomBtn.onclick = () => {
+    const label = symptomInput.value.trim();
+    if (!label) return;
+    const { customItems, item } = addCustomSymptom(label);
+    State.customItems = customItems;
+    const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+    State.dayLogs = new Map(setDaySymptoms(daySheetISO, [...entry.symptoms, item.id]).map(e => [e.date, e]));
+    renderDaySheetContent();
+  };
+
+  const addMoodBtn = document.getElementById('moodCustomAddBtn');
+  const moodInput = document.getElementById('moodCustomInput');
+  if (addMoodBtn) addMoodBtn.onclick = () => {
+    const label = moodInput.value.trim();
+    if (!label) return;
+    const { customItems, item } = addCustomMood(label);
+    State.customItems = customItems;
+    const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+    State.dayLogs = new Map(setDayMoods(daySheetISO, [...entry.moods, item.id]).map(e => [e.date, e]));
+    renderDaySheetContent();
+  };
+}
+
+/** Großes Bottom-Sheet für Schmerz-Einträge (Kategorie + Intensität +
+    Tageszeit, mehrere pro Tag möglich), Symptome und Stimmung — nur im
+    Detailgrad "Detailliert" (Einstellungen -> Schmerzen), siehe
+    handleDayLongPress() oben. Liegt außerhalb von #app (wie der Toast in
+    02-state-theme.js), damit ein Re-Render der aktuellen View das Sheet nicht
+    versehentlich mit wegreißt. Jede Interaktion speichert sofort (kein
+    separater "Speichern"-Schritt) — Tap auf den abgedunkelten Hintergrund oder
+    "Schließen" beendet die Eingabe. */
+function openDayDetailSheet(iso){
+  closeDaySheet();
+  daySheetISO = iso;
+  painDraft = null;
+  const date = parseISODate(iso);
 
   const backdrop = document.createElement('div');
   backdrop.className = 'pain-sheet-backdrop';
-  backdrop.id = 'painSheetBackdrop';
+  backdrop.id = 'daySheetBackdrop';
   backdrop.innerHTML = `
-    <div class="pain-sheet" role="dialog" aria-modal="true" aria-label="Schmerzen eintragen">
+    <div class="pain-sheet day-sheet" role="dialog" aria-modal="true" aria-label="Tag erfassen">
       <p class="pain-sheet-date">${fmtDateReadable(date)}</p>
-      <p class="pain-sheet-title">Wo tut es weh?</p>
-      <div class="pain-sheet-options">${optionsHTML}</div>
+      <p class="pain-sheet-title">Was hast du erlebt?</p>
+      <div id="daySheetBody">${daySheetBodyHTML(iso)}</div>
       <div class="pain-sheet-actions">
-        <button type="button" class="pain-sheet-btn pain-sheet-btn--secondary" id="painSheetRemoveBtn">Kein Schmerztag</button>
-        <button type="button" class="pain-sheet-btn" id="painSheetSaveBtn">Speichern</button>
+        <button type="button" class="pain-sheet-btn pain-sheet-btn--secondary" id="daySheetCloseBtn">Schließen</button>
       </div>
     </div>
   `;
   document.body.appendChild(backdrop);
 
   backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) closePainCategorySheet();
+    if (e.target === backdrop) closeDaySheet();
   });
+  document.getElementById('daySheetCloseBtn').onclick = () => closeDaySheet();
 
-  const applyAndClose = (categories) => {
-    State.painDays = new Map(setPainCategories(iso, categories).map(p => [p.date, p.categories]));
-    refreshDayCellClasses();
-    closePainCategorySheet();
-  };
-
-  document.getElementById('painSheetRemoveBtn').onclick = () => applyAndClose([]);
-  document.getElementById('painSheetSaveBtn').onclick = () => {
-    const chosen = Array.from(backdrop.querySelectorAll('.pain-sheet-checkbox:checked')).map(cb => cb.value);
-    applyAndClose(chosen);
-  };
+  wireDaySheetBody();
 }
 
-function closePainCategorySheet(){
-  const backdrop = document.getElementById('painSheetBackdrop');
+function closeDaySheet(){
+  const backdrop = document.getElementById('daySheetBackdrop');
   if (backdrop) backdrop.remove();
+  daySheetISO = null;
+  painDraft = null;
 }
 
 // Ein delegierter Klick-Handler auf dem Monats-Container statt Wiring pro Tageszelle:

@@ -251,7 +251,7 @@ function computeCycleStats(periods, today){
 /* ---------------------------------------------------
    Schmerztage-Musteranalyse
    Reine Funktionen für 07-chart.js: ordnen jeden als Schmerztag markierten Tag
-   (State.painDays, togglePainDay() in 01-storage.js) rückblickend einer Zyklus-
+   (State.dayLogs, togglePainDayQuick()/addPainEntry() in 01-storage.js) rückblickend einer Zyklus-
    phase zu — anders als computeCycleStats() oben, das nur "heute" einordnet.
 --------------------------------------------------- */
 
@@ -289,8 +289,11 @@ function classifyPhaseForDate(iso, sortedPeriods, avgCycleLength){
   return 'Lutealphase';
 }
 
-/** Zählt die Schmerztage je Zyklusphase und ermittelt die häufigste. */
-function computePainPhaseStats(periods, painDays){
+/** Zählt Vorkommen (isoList darf Duplikate enthalten -> ein Datum mit mehreren
+    Einträgen zählt entsprechend mehrfach) je Zyklusphase und ermittelt die
+    häufigste Phase. Generische Basis für "Schmerzen/Symptome/Stimmung nach
+    Zyklusphase" (07-chart.js). */
+function computePhaseOccurrenceStats(periods, isoList){
   const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
   const cycleLengths = [];
   for (let i = 0; i < sorted.length - 1; i++){
@@ -301,20 +304,93 @@ function computePainPhaseStats(periods, painDays){
   const counts = { 'Menstruation': 0, 'Follikelphase': 0, 'Fruchtbares Fenster': 0, 'Lutealphase': 0 };
   let unclassified = 0;
 
-  painDays.forEach(iso => {
+  isoList.forEach(iso => {
     const phase = classifyPhaseForDate(iso, sorted, avgCycleLength);
     if (phase) counts[phase] += 1;
     else unclassified += 1;
   });
 
-  const classifiedTotal = painDays.length - unclassified;
+  const classifiedTotal = isoList.length - unclassified;
   let dominant = null;
   if (classifiedTotal > 0){
     dominant = Object.keys(counts).reduce((best, phase) => counts[phase] > counts[best] ? phase : best);
     if (counts[dominant] === 0) dominant = null;
   }
 
-  return { counts, unclassified, classifiedTotal, totalPainDays: painDays.length, dominant };
+  return { counts, unclassified, classifiedTotal, totalCount: isoList.length, dominant };
+}
+
+/** Alle Schmerz-Einträge (aus State.dayLogs, siehe 02-state-theme.js) als
+    flache Liste mit angehängter Zyklusphase — Basis für Ø-Intensität und die
+    Tageszeit-Verteilung (07-chart.js/08-stats-progress.js). Einträge ohne
+    erfasste Intensität (z.B. aus dem "Schnell"-Modus oder migrierte alte
+    Schmerztage) tragen intensity: null und fließen NICHT in den
+    Intensitäts-Durchschnitt ein, zählen aber weiterhin als Schmerz-Eintrag
+    (avgIntensityCount vs. totalCount unterscheiden das).
+    dayLogsArray: Array wie von loadDayLogs()/State.dayLogs.values() geliefert. */
+function computePainStats(periods, dayLogsArray){
+  const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
+  const cycleLengths = [];
+  for (let i = 0; i < sorted.length - 1; i++){
+    cycleLengths.push(daysBetween(parseISODate(sorted[i].start), parseISODate(sorted[i + 1].start)));
+  }
+  const avgCycleLength = Math.round(average(cycleLengths) ?? APP_DATA.CYCLE_DEFAULTS.AVERAGE_CYCLE_LENGTH);
+
+  const entries = [];
+  dayLogsArray.forEach(day => {
+    (day.pain || []).forEach(p => {
+      entries.push({
+        iso: day.date,
+        category: p.category,
+        intensity: p.intensity,
+        timeOfDay: p.timeOfDay,
+        phase: classifyPhaseForDate(day.date, sorted, avgCycleLength)
+      });
+    });
+  });
+
+  const withIntensity = entries.filter(e => e.intensity != null);
+  const avgIntensity = withIntensity.length ? average(withIntensity.map(e => e.intensity)) : null;
+
+  const byTimeOfDay = {};
+  APP_DATA.PAIN_TIME_OF_DAY.forEach(t => { byTimeOfDay[t.id] = 0; });
+  entries.forEach(e => { if (e.timeOfDay && byTimeOfDay[e.timeOfDay] !== undefined) byTimeOfDay[e.timeOfDay] += 1; });
+
+  return { entries, totalCount: entries.length, avgIntensity, byTimeOfDay };
+}
+
+/** Zählt, wie oft jede Symptom-/Stimmungs-ID über alle Tages-Logs hinweg
+    vorkommt (id -> Anzahl Tage). field: 'symptoms' | 'moods'. */
+function computeItemFrequency(dayLogsArray, field){
+  const counts = {};
+  dayLogsArray.forEach(day => {
+    (day[field] || []).forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+  });
+  return counts;
+}
+
+/** Wandelt ein id->Anzahl-Objekt (computeItemFrequency()) in absteigend
+    sortierte { id, label, count }-Zeilen um, Labels aus dem übergebenen
+    Katalog (symptomCatalog()/moodCatalog(), 02-state-theme.js) aufgelöst. */
+function topItemsFromCounts(counts, catalog, limit){
+  return Object.keys(counts)
+    .map(id => {
+      const item = catalog.find(c => c.id === id);
+      return { id, label: item ? item.label : id, count: counts[id] };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit ?? catalog.length);
+}
+
+/** Flache Liste aller (ggf. wiederholten) Daten, an denen mindestens ein
+    Eintrag im Feld `field` ('symptoms' | 'moods') vorhanden war — ein Datum
+    mit z.B. 3 Symptomen erscheint 3x (Gewichtung für computePhaseOccurrenceStats()). */
+function flattenFieldOccurrences(dayLogsArray, field){
+  const list = [];
+  dayLogsArray.forEach(day => {
+    (day[field] || []).forEach(() => list.push(day.date));
+  });
+  return list;
 }
 
 /* ---------------------------------------------------

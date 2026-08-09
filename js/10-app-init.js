@@ -6,7 +6,8 @@
 --------------------------------------------------- */
 function initApp(){
   State.periods = loadPeriods();
-  State.painDays = new Map(loadPainDays().map(p => [p.date, p.categories]));
+  State.dayLogs = new Map(loadDayLogs().map(e => [e.date, e]));
+  State.customItems = loadCustomItems();
   State.settings = { ...State.settings, ...loadSettings() };
   if (!Array.isArray(State.settings.hiddenItems)) State.settings.hiddenItems = [];
   if (!State.settings.themePreset) State.settings.themePreset = APP_DATA.DEFAULT_THEME_PRESET_ID;

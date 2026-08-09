@@ -20,7 +20,15 @@ const APP_DATA = {
     PERIODS: 'tracker_periods_v1',
     THEME: 'tracker_theme_v1',
     SETTINGS: 'tracker_settings_v1',
-    PAIN_DAYS: 'tracker_pain_days_v1'
+    // Alter Key, wird nur noch einmalig gelesen, um bestehende Installationen
+    // nach tracker_day_logs_v1 zu migrieren (siehe loadDayLogs() in 01-storage.js).
+    PAIN_DAYS: 'tracker_pain_days_v1',
+    // Ein Eintrag pro Tag mit Schmerz-Log(s), Symptomen und Stimmungen — ersetzt
+    // das alte, reine Schmerztage-Format (siehe loadDayLogs()/saveDayLogs()).
+    DAY_LOGS: 'tracker_day_logs_v1',
+    // Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (siehe
+    // addCustomSymptom()/addCustomMood() in 01-storage.js).
+    CUSTOM_ITEMS: 'tracker_custom_items_v1'
   },
 
   // Zyklus-Defaults für die spätere Vorhersage-Engine (03-utils.js)
@@ -54,7 +62,7 @@ const APP_DATA = {
   // Feingranulare Schmerz-Kategorien für den "Detailliert"-Modus (Einstellungen
   // -> Detailgrad, siehe State.settings.detailLevel). Im "Schnell"-Modus wird
   // ein Schmerztag weiterhin nur pauschal markiert (leeres categories-Array im
-  // Storage-Eintrag, siehe setPainCategories()/togglePainDay() in 01-storage.js).
+  // Storage-Eintrag, siehe addPainEntry()/togglePainDayQuick() in 01-storage.js).
   PAIN_CATEGORIES: [
     { id: 'unterleib', label: 'Unterleib' },
     { id: 'kopf', label: 'Kopfschmerzen' },
@@ -62,6 +70,43 @@ const APP_DATA = {
     { id: 'muskeln', label: 'Muskelschmerzen' },
     { id: 'ruecken', label: 'Rückenschmerzen' },
     { id: 'sonstige', label: 'Sonstige' }
+  ],
+
+  // Tageszeit-Auswahl für einen einzelnen Schmerz-Eintrag (Detailgrad
+  // "Detailliert", siehe openDayDetailSheet() in 04-calendar.js). Ein Tag kann
+  // mehrere Schmerz-Einträge mit je eigener Kategorie/Intensität/Tageszeit
+  // haben (State.dayLogs, 02-state-theme.js).
+  PAIN_TIME_OF_DAY: [
+    { id: 'morning', label: 'Morgens' },
+    { id: 'midday', label: 'Mittags' },
+    { id: 'evening', label: 'Abends' },
+    { id: 'night', label: 'Nachts' }
+  ],
+
+  // Körperliche Begleitsymptome (Detailgrad "Detailliert"), Mehrfachauswahl pro
+  // Tag. Getrennt von PAIN_CATEGORIES, da Schmerzen zusätzlich Intensität +
+  // Tageszeit tragen, Symptome hier bewusst nur an/aus sind. Nutzer:innen können
+  // eigene Symptome ergänzen (State.customItems.symptoms, siehe
+  // addCustomSymptom() in 01-storage.js) — diese Liste ist nur der feste Anfang.
+  SYMPTOM_CATEGORIES: [
+    { id: 'geruch', label: 'Geruchsempfindlichkeit' },
+    { id: 'licht', label: 'Lichtempfindlichkeit' },
+    { id: 'uebelkeit', label: 'Übelkeit' },
+    { id: 'muedigkeit', label: 'Müdigkeit' },
+    { id: 'blaehungen', label: 'Blähungen' },
+    { id: 'heisshunger', label: 'Heißhunger' },
+    { id: 'schlaflosigkeit', label: 'Schlaflosigkeit' }
+  ],
+
+  // Stimmungs-Tags, ebenfalls Mehrfachauswahl pro Tag, ebenfalls um eigene
+  // Einträge ergänzbar (State.customItems.moods).
+  MOOD_CATEGORIES: [
+    { id: 'reizbar', label: 'Reizbar' },
+    { id: 'gestresst', label: 'Gestresst' },
+    { id: 'traurig', label: 'Traurig' },
+    { id: 'aengstlich', label: 'Ängstlich' },
+    { id: 'energie', label: 'Energiegeladen' },
+    { id: 'ausgeglichen', label: 'Ausgeglichen' }
   ],
 
   // Vollständige Farbthemen für die "Farbthema"-Auswahl in 09-settings.js
@@ -249,9 +294,15 @@ const APP_DATA = {
     { id: 'stat-nextPeriod', label: 'Nächste Periode (Stats)' },
     { id: 'stat-fertileWindow', label: 'Fruchtbares Fenster (Stats)' },
     { id: 'stat-ovulation', label: 'Geschätzter Eisprung (Stats)' },
-    { id: 'stat-painTotal', label: 'Schmerztage insgesamt (Stats)' },
+    { id: 'stat-painTotal', label: 'Schmerz-Einträge insgesamt (Stats)' },
+    { id: 'stat-painIntensity', label: 'Ø Schmerzintensität (Stats)' },
+    { id: 'stat-topSymptoms', label: 'Häufigste Symptome (Stats)' },
+    { id: 'stat-topMoods', label: 'Häufigste Stimmungen (Stats)' },
     { id: 'chart-periodLength', label: 'Periodendauer-Diagramm (Chart)' },
     { id: 'chart-cycleLength', label: 'Zykluslängen-Diagramm (Chart)' },
-    { id: 'chart-painPhase', label: 'Schmerztage-nach-Phase-Diagramm (Chart)' }
+    { id: 'chart-painPhase', label: 'Schmerzen-nach-Phase-Diagramm (Chart)' },
+    { id: 'chart-painTimeOfDay', label: 'Schmerzen-nach-Tageszeit-Diagramm (Chart)' },
+    { id: 'chart-symptomsByPhase', label: 'Symptome-nach-Phase-Diagramm (Chart)' },
+    { id: 'chart-moodsByPhase', label: 'Stimmung-nach-Phase-Diagramm (Chart)' }
   ]
 };
