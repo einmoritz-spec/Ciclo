@@ -19,6 +19,15 @@
       als PDF speicherbar gemacht — funktioniert auf Android/Desktop/iOS gleich.
 --------------------------------------------------- */
 
+// Welcher eigene Symptom-/Stimmungs-Chip gerade im "Eigene Kategorien"-
+// Abschnitt umbenannt wird (null = keiner) — { field: 'symptoms'|'moods', id }.
+// Siehe customItemRowHTML() weiter unten.
+let editingCustomItem = null;
+
+// Ob die Palette für "Eigene Farbe" gerade aufgeklappt ist (siehe
+// customThemeRowHTML()/customPaletteHTML() weiter unten).
+let showCustomPalette = false;
+
 function colorSchemeOptionHTML(value, label, current){
   return `<button type="button" class="settings-pill${value === current ? ' is-active' : ''}" data-scheme="${value}">${label}</button>`;
 }
@@ -39,6 +48,55 @@ function themePresetRowHTML(preset, currentId){
       <span class="theme-preset-name">${preset.name}</span>
       <span class="theme-preset-check">${APP_DATA.ICONS.CHECK}</span>
     </button>
+  `;
+}
+
+/** 5. Zeile in der Farbthema-Liste: "Eigene Farbe" — statt eines fest
+    hinterlegten Variablensatzes wird hier bei Auswahl eines Palette-Farbtons
+    live ein komplettes Hell/Dunkel-Set abgeleitet (generateEarthyTheme(),
+    03-utils.js). Die 3-Streifen-Vorschau zeigt, sofern schon eine Farbe
+    gewählt wurde, Akzent/Fläche/Header-Ton des ABGELEITETEN Themas (damit die
+    Vorschau genauso funktioniert wie bei den festen Themen) — ohne gewählte
+    Farbe stattdessen drei Beispieltöne aus der Palette als Hinweis "hier
+    warten mehr Farben". Ein Tap öffnet/schließt die Palette darunter
+    (showCustomPalette, siehe unten) statt sofort ein Thema zu setzen — erst
+    ein Tap auf einen konkreten Farbton wählt & aktiviert. */
+function customThemeRowHTML(currentId){
+  const isActive = currentId === 'custom';
+  const chosenColor = State.settings.customThemeColor;
+  const previewColors = chosenColor
+    ? (() => {
+        const t = generateEarthyTheme(chosenColor).light;
+        return [t['--color-accent'], t['--color-bg'], t['--color-header-bg']];
+      })()
+    : [APP_DATA.EARTHY_PALETTE[1], APP_DATA.EARTHY_PALETTE[5], APP_DATA.EARTHY_PALETTE[10]];
+  const stripesHTML = previewColors.map(color => `<span style="background:${color}"></span>`).join('');
+
+  return `
+    <button type="button" class="theme-preset-row${isActive ? ' is-active' : ''}" id="customThemeToggleBtn">
+      <span class="theme-preset-swatch">${stripesHTML}</span>
+      <span class="theme-preset-name">Eigene Farbe</span>
+      <span class="theme-preset-check">${APP_DATA.ICONS.CHECK}</span>
+    </button>
+    ${showCustomPalette ? customPaletteHTML() : ''}
+  `;
+}
+
+/** Raster mit der kompletten erdig-pastelligen Farbpalette (APP_DATA.
+    EARTHY_PALETTE) — jeder Tap wählt die Farbe direkt aus und aktiviert
+    "Eigene Farbe" sofort (kein separater Bestätigungs-Schritt), siehe
+    wireSettingsView(). Die aktuell gewählte Farbe ist per Rahmen markiert. */
+function customPaletteHTML(){
+  const chosenColor = State.settings.customThemeColor;
+  return `
+    <div class="custom-palette">
+      <p class="settings-text">Wähle einen Farbton — Akzent-, Hell- und Dunkel-Variante werden automatisch dazu erzeugt.</p>
+      <div class="custom-palette-grid">
+        ${APP_DATA.EARTHY_PALETTE.map(hex => `
+          <button type="button" class="custom-palette-swatch${chosenColor === hex ? ' is-selected' : ''}" data-color="${hex}" style="background:${hex}" aria-label="Farbe ${hex}"></button>
+        `).join('')}
+      </div>
+    </div>
   `;
 }
 
@@ -67,6 +125,66 @@ function visibilityRowHTML(item){
   `;
 }
 
+/** Die komplette "Sichtbare Bereiche"-Liste, gruppiert nach Themenbereich
+    (APP_DATA.VISIBILITY_GROUPS) statt einer einzigen langen, unsortierten
+    Liste — mit knapp 20 Elementen inzwischen sonst schwer zu überblicken. */
+function visibilityGroupsHTML(){
+  return APP_DATA.VISIBILITY_GROUPS.map(group => `
+    <p class="settings-subheading">${group.label}</p>
+    <div class="visibility-list">
+      ${group.items.map(visibilityRowHTML).join('')}
+    </div>
+  `).join('');
+}
+
+/** Eine Zeile in "Eigene Kategorien" (Einstellungen -> Beschwerden): zeigt
+    entweder das Label mit Umbenennen-/Löschen-Buttons ODER, wenn gerade
+    bearbeitet (editingCustomItem, siehe unten), ein Eingabefeld mit Speichern/
+    Abbrechen. field: 'symptoms' | 'moods'. */
+function customItemRowHTML(field, item){
+  const isEditing = editingCustomItem && editingCustomItem.field === field && editingCustomItem.id === item.id;
+  if (isEditing){
+    return `
+      <div class="custom-item-row custom-item-row--editing" data-field="${field}" data-id="${item.id}">
+        <input type="text" class="chip-add-input" id="customItemEditInput" value="${escapeAttr(item.label)}">
+        <button type="button" class="chip-add-btn custom-item-save-btn" data-field="${field}" data-id="${item.id}" aria-label="Speichern">${APP_DATA.ICONS.CHECK}</button>
+        <button type="button" class="custom-item-cancel-btn" id="customItemCancelBtn" aria-label="Abbrechen">×</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="custom-item-row" data-field="${field}" data-id="${item.id}">
+      <span class="custom-item-label">${item.label}</span>
+      <button type="button" class="custom-item-rename-btn" data-field="${field}" data-id="${item.id}" aria-label="Umbenennen">✎</button>
+      <button type="button" class="custom-item-delete-btn" data-field="${field}" data-id="${item.id}" aria-label="Löschen">×</button>
+    </div>
+  `;
+}
+
+/** "Eigene Kategorien": eigene, per "+ Eigenes" im Tages-Sheet angelegte
+    Symptom-/Stimmungs-Chips (State.customItems, siehe 02-state-theme.js) lassen
+    sich hier umbenennen oder löschen — die feste Grundliste (APP_DATA.
+    SYMPTOM_CATEGORIES/MOOD_CATEGORIES) ist bewusst nicht bearbeitbar. Kommt
+    leer zurück, solange noch keine eigenen Chips angelegt wurden. */
+function customCategoriesSectionHTML(){
+  const hasCustom = State.customItems.symptoms.length || State.customItems.moods.length;
+  if (!hasCustom) return '';
+  return `
+    <section class="settings-section">
+      <h2 class="settings-heading">Eigene Kategorien</h2>
+      <p class="settings-text">Per "+ Eigenes" im Tages-Sheet angelegte Symptome/Stimmungen — hier umbenennen oder entfernen.</p>
+      ${State.customItems.symptoms.length ? `
+        <p class="settings-subheading">Symptome</p>
+        <div class="custom-item-list">${State.customItems.symptoms.map(i => customItemRowHTML('symptoms', i)).join('')}</div>
+      ` : ''}
+      ${State.customItems.moods.length ? `
+        <p class="settings-subheading">Stimmung</p>
+        <div class="custom-item-list">${State.customItems.moods.map(i => customItemRowHTML('moods', i)).join('')}</div>
+      ` : ''}
+    </section>
+  `;
+}
+
 function settingsContentHTML(){
   const settings = loadSettings();
   const currentScheme = settings.colorScheme || 'system';
@@ -86,6 +204,7 @@ function settingsContentHTML(){
       <p class="settings-label">Farbthema</p>
       <div class="theme-preset-list" id="themePresetList">
         ${APP_DATA.THEME_PRESETS.map(p => themePresetRowHTML(p, currentPreset)).join('')}
+        ${customThemeRowHTML(currentPreset)}
       </div>
     </section>
 
@@ -103,11 +222,11 @@ function settingsContentHTML(){
 
     <section class="settings-section">
       <h2 class="settings-heading">Sichtbare Bereiche</h2>
-      <p class="settings-text">Per langem Drücken auf eine Karte in Stats oder Chart lässt sie sich ausblenden. Hier wieder einblendbar.</p>
-      <div class="visibility-list">
-        ${APP_DATA.VISIBILITY_ITEMS.map(visibilityRowHTML).join('')}
-      </div>
+      <p class="settings-text">Per langem Drücken auf eine Karte in Stats oder Chart lässt sie sich ausblenden. Hier wieder einblendbar, nach Bereich sortiert.</p>
+      ${visibilityGroupsHTML()}
     </section>
+
+    ${customCategoriesSectionHTML()}
 
     <section class="settings-section">
       <h2 class="settings-heading">Export &amp; Import</h2>
@@ -344,8 +463,17 @@ function wireSettingsView(){
   document.querySelectorAll('#schemeRow .settings-pill').forEach(btn => {
     btn.onclick = () => handleSchemeSelect(btn.dataset.scheme);
   });
-  document.querySelectorAll('#themePresetList .theme-preset-row').forEach(btn => {
+  document.querySelectorAll('#themePresetList .theme-preset-row[data-theme-preset]').forEach(btn => {
     btn.onclick = () => handleThemePresetSelect(btn.dataset.themePreset);
+  });
+  const customThemeToggleBtn = document.getElementById('customThemeToggleBtn');
+  if (customThemeToggleBtn) customThemeToggleBtn.onclick = () => { showCustomPalette = !showCustomPalette; renderSettingsView(); };
+  document.querySelectorAll('.custom-palette-swatch').forEach(btn => {
+    btn.onclick = () => {
+      State.settings.customThemeColor = btn.dataset.color;
+      showCustomPalette = false;
+      handleThemePresetSelect('custom');
+    };
   });
   document.querySelectorAll('#detailLevelRow .settings-pill').forEach(btn => {
     btn.onclick = () => handleDetailLevelSelect(btn.dataset.detailLevel);
@@ -357,6 +485,43 @@ function wireSettingsView(){
   document.querySelectorAll('.visibility-row-checkbox').forEach(cb => {
     cb.onchange = () => {
       if (cb.checked) showItem(cb.dataset.visId); else hideItem(cb.dataset.visId);
+    };
+  });
+
+  // "Eigene Kategorien": Umbenennen öffnet die Inline-Bearbeitung (kein
+  // Storage-Zugriff nötig, nur ein Re-Render mit editingCustomItem gesetzt),
+  // Speichern/Abbrechen/Löschen greifen auf die Storage-Funktionen aus
+  // 01-storage.js zu und aktualisieren State.customItems danach direkt aus
+  // deren Rückgabewert (kein erneutes loadCustomItems() nötig).
+  document.querySelectorAll('.custom-item-rename-btn').forEach(btn => {
+    btn.onclick = () => {
+      editingCustomItem = { field: btn.dataset.field, id: btn.dataset.id };
+      renderSettingsView();
+    };
+  });
+  const cancelEditBtn = document.getElementById('customItemCancelBtn');
+  if (cancelEditBtn) cancelEditBtn.onclick = () => { editingCustomItem = null; renderSettingsView(); };
+  document.querySelectorAll('.custom-item-save-btn').forEach(btn => {
+    btn.onclick = () => {
+      const input = document.getElementById('customItemEditInput');
+      const newLabel = input.value.trim();
+      if (!newLabel) return;
+      State.customItems = renameCustomItem(btn.dataset.field, btn.dataset.id, newLabel);
+      editingCustomItem = null;
+      renderSettingsView();
+    };
+  });
+  document.querySelectorAll('.custom-item-delete-btn').forEach(btn => {
+    btn.onclick = () => {
+      const field = btn.dataset.field;
+      const id = btn.dataset.id;
+      const item = State.customItems[field].find(i => i.id === id);
+      const label = item ? item.label : 'diese Kategorie';
+      if (!confirm(`"${label}" wirklich löschen? Sie wird auch aus bereits erfassten Tagen entfernt.`)) return;
+      const result = deleteCustomItem(field, id);
+      State.customItems = result.customItems;
+      State.dayLogs = new Map(result.dayLogs.map(e => [e.date, e]));
+      renderSettingsView();
     };
   });
 }

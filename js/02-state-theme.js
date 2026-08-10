@@ -28,7 +28,7 @@ const State = {
   // detailLevel: 'quick' | 'detailed' — steuert, ob ein per langem Druck markierter
   // Schmerztag nur pauschal (quick) oder mit Kategorien aus APP_DATA.PAIN_CATEGORIES
   // (detailed) erfasst wird, siehe openDayDetailSheet() in 04-calendar.js.
-  // hiddenItems: Array von IDs aus APP_DATA.VISIBILITY_ITEMS, die per langem Druck
+  // hiddenItems: Array von IDs aus APP_DATA.VISIBILITY_GROUPS, die per langem Druck
   // ausgeblendet wurden (siehe hideItem()/showItem() unten).
   // Wird in initApp() (10-app-init.js) mit dem gespeicherten Wert aus loadSettings()
   // überschrieben; die Defaults hier gelten nur für Erstinstallationen.
@@ -103,14 +103,31 @@ function resolvedColorScheme(){
 /** Wendet den Variablensatz (light/dark) des aktuell in State.settings.themePreset
     gewählten Farbthemas an und sichert ihn zusätzlich als rohes Overrides-Objekt
     (loadThemeOverrides()/saveThemeOverrides(), 01-storage.js) — u.a. damit ein
-    Vollbackup (exportAllData()) den aktuellen Anzeigezustand mitsichert. */
+    Vollbackup (exportAllData()) den aktuellen Anzeigezustand mitsichert.
+    Aktualisiert zusätzlich das <meta name="theme-color">-Tag: das steuert bei
+    einer installierten PWA auf Android die Farbe der System-Statusleiste. Ohne
+    diesen Schritt bliebe die Statusleiste unabhängig vom gewählten Farbthema
+    fest auf der Farbe aus index.html (Wald, das Default-Thema) stehen. */
 function reapplyThemePresetVars(){
   const presetId = State.settings.themePreset || APP_DATA.DEFAULT_THEME_PRESET_ID;
-  const preset = APP_DATA.THEME_PRESETS.find(p => p.id === presetId)
-    || APP_DATA.THEME_PRESETS.find(p => p.id === APP_DATA.DEFAULT_THEME_PRESET_ID);
-  const vars = resolvedColorScheme() === 'dark' ? preset.dark : preset.light;
+  let vars;
+  if (presetId === 'custom' && State.settings.customThemeColor){
+    // "Eigene Farbe": kein fester Eintrag in APP_DATA.THEME_PRESETS, sondern
+    // live aus der gespeicherten Basisfarbe abgeleitet (generateEarthyTheme(),
+    // 03-utils.js) — so bleibt der Vorrat an "fest hinterlegten" Themen klein
+    // und trotzdem lässt sich aus der ganzen Palette wählen.
+    const generated = generateEarthyTheme(State.settings.customThemeColor);
+    vars = resolvedColorScheme() === 'dark' ? generated.dark : generated.light;
+  } else {
+    const preset = APP_DATA.THEME_PRESETS.find(p => p.id === presetId)
+      || APP_DATA.THEME_PRESETS.find(p => p.id === APP_DATA.DEFAULT_THEME_PRESET_ID);
+    vars = resolvedColorScheme() === 'dark' ? preset.dark : preset.light;
+  }
   applyThemeVars(vars);
   saveThemeOverrides(vars);
+
+  const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+  if (metaThemeColor && vars['--color-header-bg']) metaThemeColor.setAttribute('content', vars['--color-header-bg']);
 }
 
 /** Wechselt das Farbthema (Sand/Wald/Ton/Stein, siehe APP_DATA.THEME_PRESETS)
@@ -127,7 +144,7 @@ function applyThemePreset(presetId){
    werden (siehe attachLongPress() unten, verwendet in 08-stats-progress.js
    und 07-chart.js) und in den Einstellungen unter "Sichtbare Bereiche"
    wieder eingeblendet werden (09-settings.js). Die IDs kommen zentral aus
-   APP_DATA.VISIBILITY_ITEMS. Persistiert als Teil von State.settings, also
+   APP_DATA.VISIBILITY_GROUPS. Persistiert als Teil von State.settings, also
    über dieselbe loadSettings()/saveSettings()-Ablage wie das Farbschema.
 --------------------------------------------------- */
 function isItemHidden(id){
@@ -183,6 +200,15 @@ function attachLongPress(el, onLongPress, duration){
   }, true);
 }
 
+/** Alle Sichtbarkeits-Items aus APP_DATA.VISIBILITY_GROUPS als flache Liste
+    (ohne Gruppierung) — für Stellen, die nur die id->label-Auflösung brauchen,
+    nicht die Gruppen-Struktur (z.B. wireVisibilityLongPress() unten). Die
+    Gruppen selbst werden nur für die Anzeige in "Sichtbare Bereiche" (09-
+    settings.js) gebraucht. */
+function flatVisibilityItems(){
+  return APP_DATA.VISIBILITY_GROUPS.flatMap(g => g.items);
+}
+
 /** Sucht innerhalb von `root` alle Elemente mit einem data-vis-id-Attribut und
     hängt attachLongPress() dran: beim Auslösen wird NICHT sofort ausgeblendet,
     sondern ein Bestätigungs-Toast mit "Ausblenden"-Button gezeigt (showToast()
@@ -193,7 +219,7 @@ function wireVisibilityLongPress(root, rerenderFn){
   root.querySelectorAll('[data-vis-id]').forEach(el => {
     attachLongPress(el, () => {
       const id = el.dataset.visId;
-      const item = APP_DATA.VISIBILITY_ITEMS.find(i => i.id === id);
+      const item = flatVisibilityItems().find(i => i.id === id);
       const label = item ? item.label : 'Element';
       showToast(`"${label}" ausblenden?`, {
         label: 'Ausblenden',

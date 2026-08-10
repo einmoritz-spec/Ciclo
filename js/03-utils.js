@@ -34,9 +34,146 @@ function daysBetween(a, b){
   return Math.round((utcB - utcA) / msPerDay);
 }
 
+/* ---------------------------------------------------
+   Farb-Generator für "Eigene Farbe" (5. Theme-Option, siehe customPaletteHTML()
+   in 09-settings.js). Aus einer einzigen, aus einer kuratierten Palette
+   gewählten Basisfarbe (APP_DATA.EARTHY_PALETTE) wird per HSL-Rechnung ein
+   komplettes Hell/Dunkel-Variablenpaar abgeleitet — dieselbe Struktur wie bei
+   den vier festen APP_DATA.THEME_PRESETS, nur automatisch statt von Hand
+   abgestimmt.
+--------------------------------------------------- */
+function clampNum(v, min, max){ return Math.min(max, Math.max(min, v)); }
+
+function hexToRgb(hex){
+  const clean = hex.replace('#', '');
+  const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean;
+  const bigint = parseInt(full, 16);
+  return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
+}
+
+function rgbToHex(r, g, b){
+  const toHex = n => clampNum(Math.round(n), 0, 255).toString(16).padStart(2, '0');
+  return '#' + toHex(r) + toHex(g) + toHex(b);
+}
+
+function rgbToHsl(r, g, b){
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min){
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max){
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4;
+    }
+    h *= 60;
+  }
+  return { h, s: s * 100, l: l * 100 };
+}
+
+function hslToRgb(h, s, l){
+  h = ((h % 360) + 360) % 360;
+  s = clampNum(s, 0, 100) / 100;
+  l = clampNum(l, 0, 100) / 100;
+  if (s === 0){
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const hue2rgb = (pp, qq, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return pp + (qq - pp) * 6 * t;
+    if (t < 1 / 2) return qq;
+    if (t < 2 / 3) return pp + (qq - pp) * (2 / 3 - t) * 6;
+    return pp;
+  };
+  const hk = h / 360;
+  return {
+    r: Math.round(hue2rgb(p, q, hk + 1 / 3) * 255),
+    g: Math.round(hue2rgb(p, q, hk) * 255),
+    b: Math.round(hue2rgb(p, q, hk - 1 / 3) * 255)
+  };
+}
+
+function hexToHsl(hex){
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHsl(r, g, b);
+}
+
+function hslToHex(h, s, l){
+  const { r, g, b } = hslToRgb(h, s, l);
+  return rgbToHex(r, g, b);
+}
+
+/** Leitet aus einer Basisfarbe (hex) ein komplettes Hell/Dunkel-Variablenpaar
+    ab — dieselben 13 CSS-Custom-Properties wie jedes feste Farbthema in
+    APP_DATA.THEME_PRESETS. Grundidee: Farbton (h) der Basisfarbe bleibt
+    überall erhalten, nur Sättigung/Helligkeit werden je Rolle angepasst
+    (dunkler/entsättigter Header, sehr helle/entsättigte Fläche, kräftigerer
+    Akzent, ...). Perioden-Ton (period-bg/-text) nutzt einen um +25° gedrehten,
+    wärmeren Farbton (wirkt wie ein eigenständiger, aber verwandter Sand-/
+    Terracotta-Ton), Schmerz-Ton (pain) einen um +150° gedrehten, deutlich
+    abgesetzten Kontrastton — beides analog zur Systematik der festen Themen. */
+function generateEarthyTheme(baseHex){
+  const { h, s } = hexToHsl(baseHex);
+  const warmHue = (h + 25) % 360;
+  const painHue = (h + 150) % 360;
+
+  const light = {
+    '--color-header-bg': hslToHex(h, clampNum(s * 0.55, 12, 30), 15),
+    '--color-header-text': '#FFFFFF',
+    '--color-brand': hslToHex(h, clampNum(s * 0.6, 20, 45), 74),
+    '--color-bg': hslToHex(h, clampNum(s * 0.35, 8, 22), 93),
+    '--color-surface': '#FFFFFF',
+    '--color-accent': hslToHex(h, clampNum(s + 8, 30, 62), 46),
+    '--color-text-heading': hslToHex(h, clampNum(s * 0.45, 10, 25), 17),
+    '--color-text-day': hslToHex(h, clampNum(s * 0.3, 8, 20), 32),
+    '--color-text-muted': hslToHex(h, clampNum(s * 0.22, 6, 16), 58),
+    '--color-period-bg': hslToHex(warmHue, 40, 79),
+    '--color-period-text': hslToHex(warmHue, 45, 33),
+    '--color-pain': hslToHex(painHue, 30, 52),
+    '--color-selecting-outline': hslToHex(h, clampNum(s + 8, 30, 62), 46),
+    '--color-nav-inactive': hslToHex(h, clampNum(s * 0.2, 6, 16), 68)
+  };
+
+  const dark = {
+    '--color-header-bg': hslToHex(h, clampNum(s * 0.5, 10, 26), 9),
+    '--color-header-text': '#FFFFFF',
+    '--color-brand': hslToHex(h, clampNum(s * 0.55, 20, 42), 74),
+    '--color-bg': hslToHex(h, clampNum(s * 0.35, 8, 20), 8),
+    '--color-surface': hslToHex(h, clampNum(s * 0.3, 8, 18), 14),
+    '--color-accent': hslToHex(h, clampNum(s + 12, 35, 68), 60),
+    '--color-text-heading': hslToHex(h, clampNum(s * 0.22, 4, 14), 92),
+    '--color-text-day': hslToHex(h, clampNum(s * 0.18, 4, 12), 80),
+    '--color-text-muted': hslToHex(h, clampNum(s * 0.18, 4, 12), 60),
+    '--color-period-bg': hslToHex(warmHue, 34, 25),
+    '--color-period-text': hslToHex(warmHue, 42, 80),
+    '--color-pain': hslToHex(painHue, 35, 68),
+    '--color-selecting-outline': hslToHex(h, clampNum(s + 12, 35, 68), 60),
+    '--color-nav-inactive': hslToHex(h, clampNum(s * 0.2, 6, 16), 42)
+  };
+
+  return { light, dark };
+}
+
 function getMonthLabel(year, month0){
   const label = new Date(year, month0, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** 'HH:MM' aus einem ISO-Zeitstempel für den value eines <input type="time">
+    im manuellen Zeit-Editor (openTimeEditor()-Flow, 04-calendar.js). Ohne
+    Zeitstempel (sollte praktisch nicht vorkommen, da loggedAt immer beim
+    Anlegen gesetzt wird) fällt es auf die aktuelle Uhrzeit zurück, statt ein
+    leeres Feld zu zeigen. */
+function timeInputValue(iso){
+  const d = iso ? new Date(iso) : new Date();
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 }
 
 /** 'HH:MM' aus einem ISO-Zeitstempel (loggedAt, siehe nowStamp() in
@@ -309,6 +446,54 @@ function classifyPhaseForDate(iso, sortedPeriods, avgCycleLength){
   return 'Lutealphase';
 }
 
+/** Zählt Vorkommen (isoList darf Duplikate enthalten -> ein Datum mit mehreren
+    Einträgen zählt entsprechend mehrfach) je Zyklusphase und ermittelt die
+    häufigste Phase. Generische Basis für "Schmerzen/Symptome/Stimmung nach
+    Zyklusphase" (07-chart.js). */
+/** Einfache lineare Regression (kleinste Quadrate) über eine Werteliste,
+    Index (0, 1, 2, …) als x-Achse — für die Trend-Linie im Zykluslängen-
+    Trend-Diagramm (07-chart.js). Gibt slope (Änderung je Schritt) und
+    intercept zurück; bei weniger als 2 Werten null (keine Gerade bestimmbar). */
+function computeLinearTrend(values){
+  const n = values.length;
+  if (n < 2) return null;
+  const xs = values.map((_, i) => i);
+  const xMean = average(xs);
+  const yMean = average(values);
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++){
+    num += (xs[i] - xMean) * (values[i] - yMean);
+    den += (xs[i] - xMean) ** 2;
+  }
+  const slope = den === 0 ? 0 : num / den;
+  const intercept = yMean - slope * xMean;
+  return { slope, intercept };
+}
+
+/** Erkennt ein einfaches, oft nützliches Muster: wie viele Tage VOR dem
+    jeweils nächsten Periodenbeginn ein Beschwerden-Eintrag im Schnitt liegt
+    (z.B. "Schmerzen treten bei dir im Schnitt 3 Tage vor der Periode auf").
+    isoList darf Duplikate enthalten (Gewichtung). Nur Abstände von 0–14 Tagen
+    fließen ein (alles andere ist vermutlich kein Vorbote der nächsten Periode,
+    sondern reiner Zufall/ein anderer Zyklusabschnitt). Braucht mindestens 3
+    verwertbare Vorkommen, sonst null (zu wenig Daten für eine verlässliche
+    Aussage). */
+function computeLeadTimeInsight(periods, isoList){
+  const sortedPeriods = [...periods].sort((a, b) => a.start.localeCompare(b.start));
+  if (!sortedPeriods.length) return null;
+
+  const offsets = [];
+  isoList.forEach(iso => {
+    const next = sortedPeriods.find(p => p.start >= iso);
+    if (!next) return;
+    const offset = daysBetween(parseISODate(iso), parseISODate(next.start));
+    if (offset >= 0 && offset <= 14) offsets.push(offset);
+  });
+
+  if (offsets.length < 3) return null;
+  return { avgDaysBefore: average(offsets), count: offsets.length };
+}
+  const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
 /** Zählt Vorkommen (isoList darf Duplikate enthalten -> ein Datum mit mehreren
     Einträgen zählt entsprechend mehrfach) je Zyklusphase und ermittelt die
     häufigste Phase. Generische Basis für "Schmerzen/Symptome/Stimmung nach

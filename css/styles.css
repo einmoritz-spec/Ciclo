@@ -192,7 +192,7 @@ button{
 .days-grid{
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  row-gap: 14px;
+  row-gap: 20px;
 }
 .day-cell{
   position: relative;
@@ -247,23 +247,24 @@ button{
 .day-ring circle{
   fill: none;
   stroke: var(--color-period-text);
-  stroke-width: 2;
+  stroke-width: 1.6;
   stroke-linecap: round;
+  opacity: 0.85;
 }
-/* Minimalistische Marker-Punkte: zeigen auf einen Blick, was an einem Tag
-   erfasst wurde (Schmerz/Symptome/Stimmung), ohne die Zelle zu überladen.
+/* Ein einzelner Marker-Punkt pro Tag (statt bis zu drei nebeneinander, siehe
+   dayMarkersHTML(), 04-calendar.js) — Priorität Schmerz > Symptom > Stimmung.
    Der Schmerz-Punkt variiert in Größe/Deckkraft mit der Intensität (Inline-
-   Style aus painMarkerStyle(), 04-calendar.js), Symptom-/Stimmungs-Punkt sind
-   bewusst gleich groß (nur "vorhanden", keine Mengenangabe). */
+   Style aus painMarkerStyle()); ein dünner Rand in einer zweiten Farbe (auch
+   Inline-Style, box-shadow) zeigt an, dass an diesem Tag noch eine weitere
+   Kategorie erfasst wurde, ohne einen zweiten Punkt zu brauchen. */
 .day-markers{
   position: absolute;
   z-index: 1;
-  bottom: 2px;
+  bottom: 3px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 3px;
   pointer-events: none;
 }
 .day-marker{
@@ -274,13 +275,13 @@ button{
   background: var(--color-pain);
 }
 .day-marker--symptom{
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   background: var(--color-accent);
 }
 .day-marker--mood{
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   background: var(--color-text-heading);
 }
 
@@ -365,6 +366,12 @@ button{
   margin: 0 0 10px;
   font-size: 13px;
   color: var(--color-text-muted);
+}
+.day-sheet-hint{
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
 }
 .day-sheet-add-btn{
   width: 100%;
@@ -548,6 +555,7 @@ button{
   border-radius: 16px;
   padding: 16px;
   text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.05);
 }
 .stat-card-value{
   font-size: 22px;
@@ -571,6 +579,7 @@ button{
   border-radius: 14px;
   padding: 14px 16px;
   margin-bottom: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.05);
 }
 .stats-section-title{
   font-size: 14px;
@@ -581,6 +590,43 @@ button{
   font-weight: 700;
   color: var(--color-text-heading);
   white-space: nowrap;
+}
+.stats-section-value--wrap{
+  white-space: normal;
+  width: 100%;
+  line-height: 1.5;
+}
+.stat-bar-list{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin-top: 2px;
+}
+.stat-bar-row-header{
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-heading);
+  margin-bottom: 5px;
+}
+.stat-bar-row-header span:last-child{
+  font-weight: 800;
+  color: var(--color-text-muted);
+  flex: 0 0 auto;
+}
+.stat-bar-track{
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+.stat-bar-fill{
+  height: 100%;
+  border-radius: 999px;
 }
 .stats-note{
   margin: 16px 4px 0;
@@ -687,6 +733,7 @@ button{
   border-radius: 16px;
   padding: 18px 16px;
   margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.05);
 }
 .chart-card-header{
   display: flex;
@@ -708,6 +755,16 @@ button{
   font-size: 13px;
   color: var(--color-text-muted);
 }
+/* Dominante-Phase-Hinweis unter den "nach Zyklusphase"-Diagrammen (siehe
+   computePhaseOccurrenceStats().dominant in 03-utils.js), z.B. "Am häufigsten
+   in: Lutealphase" — bewusst als eigene, betonte Zeile statt Teil des
+   normalen Untertitels. */
+.chart-card-insight{
+  margin: -8px 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+}
 .chart-scroll-x{
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -726,6 +783,14 @@ button{
   stroke: var(--color-text-muted);
   stroke-width: 1;
   stroke-dasharray: 4 4;
+}
+/* Trend-Gerade im Zykluslängen-Trend-Diagramm (lineChartSVG(), 07-chart.js) —
+   bewusst dezenter/gestrichelt, damit die eigentliche Werte-Linie führend
+   bleibt und die Gerade nur als Richtungs-Hinweis dient. */
+.chart-trend-line{
+  stroke: var(--color-text-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
 }
 .chart-clip-mark{
   stroke: var(--color-surface);
@@ -825,11 +890,47 @@ button{
 .theme-preset-row.is-active .theme-preset-check{
   visibility: visible;
 }
+/* Palette für "Eigene Farbe" (customPaletteHTML(), 09-settings.js) — klappt
+   unter der Auswahl-Zeile auf. Kompaktes Raster, damit die ganze kuratierte
+   Palette (APP_DATA.EARTHY_PALETTE) ohne Scrollen innerhalb der Sektion
+   Platz findet. */
+.custom-palette{
+  padding: 4px 2px 2px;
+}
+.custom-palette-grid{
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+.custom-palette-swatch{
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.custom-palette-swatch.is-selected{
+  box-shadow: inset 0 0 0 3px var(--color-text-heading);
+}
 .settings-text{
   margin: 0 0 14px;
   font-size: 14px;
   color: var(--color-text-muted);
   line-height: 1.5;
+}
+/* Gruppen-Überschrift innerhalb eines Settings-Abschnitts (z.B. "Zyklus"/
+   "Beschwerden"/"Diagramme" in "Sichtbare Bereiche", oder "Symptome"/
+   "Stimmung" in "Eigene Kategorien") — kleiner/dezenter als settings-heading,
+   da es eine Unter-Gliederung ist, keine eigene Karte. */
+.settings-subheading{
+  margin: 18px 2px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.settings-subheading:first-child{
+  margin-top: 0;
 }
 .settings-action-btn{
   display: flex;
@@ -891,6 +992,82 @@ button{
   height: 18px;
   flex: 0 0 auto;
   accent-color: var(--color-accent);
+}
+
+/* "Eigene Kategorien" (Einstellungen -> Beschwerden): Liste eigener Symptom-/
+   Stimmungs-Chips mit Umbenennen/Löschen, siehe customItemRowHTML() in
+   09-settings.js. */
+.custom-item-list{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.custom-item-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-bg);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.custom-item-label{
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-heading);
+}
+.custom-item-rename-btn,
+.custom-item-delete-btn,
+.custom-item-cancel-btn{
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+.custom-item-delete-btn,
+.custom-item-cancel-btn{
+  font-size: 17px;
+}
+.custom-item-row--editing{
+  background: var(--color-bg);
+}
+.custom-item-row--editing .chip-add-input{
+  flex: 1 1 auto;
+}
+.custom-item-save-btn{
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--color-accent);
+  color: #FFFFFF;
+}
+.custom-item-save-btn svg{
+  width: 16px;
+  height: 16px;
+}
+
+/* Allgemeine Notiz zum ganzen Tag (Tages-Sheet, siehe openDayDetailSheet() in
+   04-calendar.js) — eigenes Textfeld, unabhängig von der Schmerz-Notiz bei
+   Kategorie "Sonstige". */
+.day-note-textarea{
+  width: 100%;
+  min-height: 64px;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  background: var(--color-bg);
+  color: var(--color-text-heading);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 /* Verhindert Textauswahl/Kontextmenü beim langen Drücken auf Stats-/Chart-Karten

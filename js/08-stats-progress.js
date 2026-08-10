@@ -21,13 +21,17 @@ function statCardHTML(id, label, value){
 }
 
 /** Wie statCardHTML(), nur für die einzeiligen "Label links, Wert rechts"-Zeilen
-    (Letzte/Nächste Periode, Fruchtbares Fenster, ...) statt der 2-Spalten-Karten. */
-function statsSectionHTML(id, title, valueHTML){
+    (Letzte/Nächste Periode, Fruchtbares Fenster, ...) statt der 2-Spalten-Karten.
+    `wrap`: true für Inhalte, die NICHT in eine Zeile passen sollen/müssen (z.B.
+    die Balkenliste der häufigsten Symptome oder ein mehrzeiliger Muster-Text
+    mit <br>) — sonst würde das sonst übliche white-space:nowrap den Inhalt
+    seitlich abschneiden statt umzubrechen. */
+function statsSectionHTML(id, title, valueHTML, wrap){
   if (isItemHidden(id)) return '';
   return `
     <div class="stats-section" data-vis-id="${id}">
       <div class="stats-section-title">${title}</div>
-      <div class="stats-section-value">${valueHTML}</div>
+      <div class="stats-section-value${wrap ? ' stats-section-value--wrap' : ''}">${valueHTML}</div>
     </div>
   `;
 }
@@ -49,13 +53,26 @@ function regularityDescriptor(score){
   return 'Unregelmäßig';
 }
 
-/** Formatiert eine Top-Liste (topItemsFromCounts(), 03-utils.js) als kurze,
-    kommagetrennte "Label (n)"-Aufzählung für statsSectionHTML() — bewusst
-    kompakt statt einer eigenen Liste je Eintrag, da es sich um eine
-    einzeilige Stats-Section handelt (wie Letzte/Nächste Periode). */
-function topItemsInlineHTML(items){
+/** Visuelle Top-Liste (statt reinem Text): jede Zeile mit Label, Anzahl und
+    einem proportional zum Maximalwert breiten Balken — deutlich schneller
+    erfassbar als eine kommagetrennte Aufzählung, siehe topItemsFromCounts()
+    in 03-utils.js für die zugrunde liegenden Daten. */
+function statBarListHTML(items, colorVar){
   if (!items.length) return '–';
-  return items.map(i => `${i.label} (${i.count})`).join(', ');
+  const max = Math.max(...items.map(i => i.count));
+  return `
+    <div class="stat-bar-list">
+      ${items.map(i => `
+        <div class="stat-bar-row">
+          <div class="stat-bar-row-header">
+            <span>${i.label}</span>
+            <span>${i.count}x</span>
+          </div>
+          <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.max(6, Math.round(i.count / max * 100))}%; background:var(${colorVar})"></div></div>
+        </div>
+      `).join('')}
+    </div>
+  `;
 }
 
 function cycleSectionHTML(stats){
@@ -110,8 +127,8 @@ function cycleSectionHTML(stats){
 function symptomsSectionHTML(){
   const dayLogsArray = Array.from(State.dayLogs.values());
   const painStats = computePainStats(State.periods, dayLogsArray);
-  const symptomCounts = topItemsFromCounts(computeItemFrequency(dayLogsArray, 'symptoms'), symptomCatalog(), 3);
-  const moodCounts = topItemsFromCounts(computeItemFrequency(dayLogsArray, 'moods'), moodCatalog(), 3);
+  const symptomCounts = topItemsFromCounts(computeItemFrequency(dayLogsArray, 'symptoms'), symptomCatalog(), 5);
+  const moodCounts = topItemsFromCounts(computeItemFrequency(dayLogsArray, 'moods'), moodCatalog(), 5);
 
   if (!painStats.totalCount && !symptomCounts.length && !moodCounts.length) return '';
 
@@ -122,19 +139,36 @@ function symptomsSectionHTML(){
     ? statsSectionHTML('stat-painIntensity', 'Ø Schmerzintensität', `${fmtDaysAvg(painStats.avgIntensity)}/10`)
     : '';
   const topSymptomsHTML = symptomCounts.length
-    ? statsSectionHTML('stat-topSymptoms', 'Häufigste Symptome', topItemsInlineHTML(symptomCounts))
+    ? statsSectionHTML('stat-topSymptoms', 'Häufigste Symptome', statBarListHTML(symptomCounts, '--color-accent'), true)
     : '';
   const topMoodsHTML = moodCounts.length
-    ? statsSectionHTML('stat-topMoods', 'Häufigste Stimmungen', topItemsInlineHTML(moodCounts))
+    ? statsSectionHTML('stat-topMoods', 'Häufigste Stimmungen', statBarListHTML(moodCounts, '--color-text-heading'), true)
     : '';
 
-  const anyVisible = painTotalHTML || painIntensityHTML || topSymptomsHTML || topMoodsHTML;
+  // "Muster erkannt": erkennt, ob Beschwerden im Schnitt eine bestimmte Anzahl
+  // Tage VOR der nächsten Periode auftreten (computeLeadTimeInsight(),
+  // 03-utils.js) — getrennt für Schmerzen und für Symptome/Stimmung
+  // zusammen, da beides unterschiedliche Vorboten sein können. Erscheint erst
+  // ab genug Datenpunkten (siehe dortige Mindestanzahl), sonst wäre die
+  // Aussage nicht verlässlich.
+  const painLead = computeLeadTimeInsight(State.periods, painStats.entries.map(e => e.iso));
+  const symptomMoodIsoList = [...flattenFieldOccurrences(dayLogsArray, 'symptoms'), ...flattenFieldOccurrences(dayLogsArray, 'moods')];
+  const symptomLead = computeLeadTimeInsight(State.periods, symptomMoodIsoList);
+  const insightLines = [];
+  if (painLead) insightLines.push(`Schmerzen treten bei dir im Schnitt ${fmtDaysAvg(painLead.avgDaysBefore)} Tage vor Periodenbeginn auf (${painLead.count} Einträge ausgewertet).`);
+  if (symptomLead) insightLines.push(`Symptome/Stimmung treten bei dir im Schnitt ${fmtDaysAvg(symptomLead.avgDaysBefore)} Tage vor Periodenbeginn auf (${symptomLead.count} Einträge ausgewertet).`);
+  const patternInsightHTML = insightLines.length
+    ? statsSectionHTML('stat-patternInsight', 'Erkanntes Muster', insightLines.join('<br>'), true)
+    : '';
+
+  const anyVisible = painTotalHTML || painIntensityHTML || topSymptomsHTML || topMoodsHTML || patternInsightHTML;
   if (!anyVisible) return '';
 
   return `
     <p class="stats-group-title">Beschwerden</p>
     ${painTotalHTML}
     ${painIntensityHTML}
+    ${patternInsightHTML}
     ${topSymptomsHTML}
     ${topMoodsHTML}
   `;

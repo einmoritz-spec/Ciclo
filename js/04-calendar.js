@@ -100,34 +100,45 @@ function predictedRingHTML(iso, hasPeriod){
     statt gar keine Größenangabe treffen zu können. */
 function painMarkerStyle(entry){
   const intensities = (entry.pain || []).map(p => p.intensity).filter(v => v != null);
-  if (!intensities.length) return 'width:7px;height:7px;opacity:0.85';
+  if (!intensities.length) return 'width:6px;height:6px;opacity:0.8';
   const max = Math.max(...intensities);
-  const size = 4 + max * 0.6;
-  const opacity = Math.min(1, 0.35 + max * 0.065);
+  const size = 4 + max * 0.5;
+  const opacity = Math.min(1, 0.4 + max * 0.055);
   return `width:${size.toFixed(1)}px;height:${size.toFixed(1)}px;opacity:${opacity.toFixed(2)}`;
 }
 
-/** Minimalistische Punkt-Reihe unter der Tageszahl, die auf einen Blick zeigt,
-    WAS an diesem Tag erfasst wurde (Schmerz/Symptome/Stimmung) — ersetzt den
-    früheren einzelnen lila Schmerz-Punkt. Schmerz-Punkt skaliert mit der
-    Intensität (siehe painMarkerStyle()), Symptom-/Stimmungs-Punkt sind bewusst
-    schlicht (nur "vorhanden ja/nein", keine Mengenangabe) um die Zelle nicht zu
-    überladen. */
+/** Zeigt für einen Tag mit Einträgen GENAU EINEN Punkt (statt bis zu drei
+    nebeneinander) — das hält die Zelle neben dem Vorhersage-Ring ruhig,
+    statt Ring + mehrere Punkte optisch übereinanderzustapeln. Priorität
+    Schmerz > Symptom > Stimmung (Schmerz transportiert über Größe/Deckkraft
+    zusätzlich die Intensität, siehe painMarkerStyle()). Sind an einem Tag
+    MEHRERE Kategorien erfasst, bekommt der Punkt zusätzlich einen dünnen Rand
+    in der Farbe der zweitwichtigsten Kategorie als dezenten Hinweis "hier ist
+    mehr als eine Sache erfasst" — ohne einen zweiten, separaten Punkt zu
+    brauchen. */
 function dayMarkersHTML(iso){
   const entry = State.dayLogs.get(iso);
   if (!entry) return '';
-  const marks = [];
-  if (entry.pain && entry.pain.length){
-    marks.push(`<span class="day-marker day-marker--pain" style="${painMarkerStyle(entry)}"></span>`);
+  const hasPain = !!(entry.pain && entry.pain.length);
+  const hasSymptom = !!(entry.symptoms && entry.symptoms.length);
+  const hasMood = !!(entry.moods && entry.moods.length);
+  if (!hasPain && !hasSymptom && !hasMood) return '';
+
+  let markerClass, baseStyle = '', secondaryVar = null;
+  if (hasPain){
+    markerClass = 'day-marker--pain';
+    baseStyle = painMarkerStyle(entry);
+    secondaryVar = hasSymptom ? '--color-accent' : (hasMood ? '--color-text-heading' : null);
+  } else if (hasSymptom){
+    markerClass = 'day-marker--symptom';
+    secondaryVar = hasMood ? '--color-text-heading' : null;
+  } else {
+    markerClass = 'day-marker--mood';
   }
-  if (entry.symptoms && entry.symptoms.length){
-    marks.push('<span class="day-marker day-marker--symptom"></span>');
-  }
-  if (entry.moods && entry.moods.length){
-    marks.push('<span class="day-marker day-marker--mood"></span>');
-  }
-  if (!marks.length) return '';
-  return `<span class="day-markers">${marks.join('')}</span>`;
+
+  const ringStyle = secondaryVar ? `box-shadow:0 0 0 1.5px var(${secondaryVar})` : '';
+  const style = [baseStyle, ringStyle].filter(Boolean).join(';');
+  return `<span class="day-markers"><span class="day-marker ${markerClass}" style="${style}"></span></span>`;
 }
 
 function dayCellHTML(iso, date, day){
@@ -339,23 +350,81 @@ function selectedItemsTimeHTML(catalog, selectedItems){
 let painDraft = null;
 let daySheetISO = null;
 
+// Aktueller Text der allgemeinen Tages-Notiz (unabhängig von der Schmerz-
+// Notiz). Wird als eigene Variable statt direkt aus State.dayLogs gehalten,
+// damit ein Re-Render des Sheets durch eine ANDERE Aktion (z.B. ein Chip-Tap)
+// während des Tippens den noch nicht gespeicherten Text nicht verwirft — erst
+// beim Verlassen des Feldes (onblur) wird tatsächlich gespeichert.
+let dayNoteDraft = '';
+
+// Ziel eines gerade offenen Zeit-Editors (langer Druck auf einen Schmerz-
+// Eintrag/Symptom-/Stimmungs-Chip, siehe attachLongPress()-Wiring in
+// wireDaySheetBody()) — { kind: 'pain'|'symptom'|'mood', id } oder null.
+// Erlaubt, die automatisch erfasste Uhrzeit eines bereits gespeicherten
+// Eintrags nachträglich manuell zu korrigieren.
+let timeEditTarget = null;
+
+/** Inline-Editor zum manuellen Setzen der Uhrzeit eines bereits erfassten
+    Schmerz-Eintrags/Symptoms/Stimmung — erscheint nach langem Druck auf den
+    jeweiligen Eintrag/Chip (siehe wireDaySheetBody()). Nutzt dieselbe Optik
+    wie das Schmerz-Unterformular (.pain-subform). */
+function timeEditorHTML(label, currentTimeValue){
+  return `
+    <div class="pain-subform" id="timeEditor">
+      <p class="pain-subform-label">Uhrzeit für „${label}“</p>
+      <input type="time" class="chip-add-input" id="timeEditorInput" value="${currentTimeValue}">
+      <div class="pain-subform-actions">
+        <button type="button" class="pain-sheet-btn pain-sheet-btn--secondary" id="timeEditorCancelBtn">Abbrechen</button>
+        <button type="button" class="pain-sheet-btn" id="timeEditorSaveBtn">Speichern</button>
+      </div>
+    </div>
+  `;
+}
+
 /** Baut den kompletten Sheet-Inhalt aus dem AKTUELLEN Tages-Log neu auf (nach
     jeder Änderung neu gerufen, siehe renderDaySheetContent()) — hält die
     Anzeige synchron zu State.dayLogs, ohne das ganze Sheet (inkl. Backdrop)
     neu zu erzeugen. */
 function daySheetBodyHTML(iso){
   const entry = State.dayLogs.get(iso) || emptyDayEntry(iso);
+
+  const painEditItem = timeEditTarget && timeEditTarget.kind === 'pain'
+    ? entry.pain.find(p => p.id === timeEditTarget.id) : null;
+  const painBottomHTML = painEditItem
+    ? timeEditorHTML(painEntryLabel(painEditItem).split(' · ')[0], timeInputValue(painEditItem.loggedAt))
+    : (painDraft ? painSubformHTML(painDraft) : '<button type="button" class="day-sheet-add-btn" id="addPainEntryBtn">+ Schmerz hinzufügen</button>');
+
+  const symptomEditItem = timeEditTarget && timeEditTarget.kind === 'symptom'
+    ? entry.symptoms.find(s => s.id === timeEditTarget.id) : null;
+  const symptomEditHTML = symptomEditItem
+    ? timeEditorHTML((symptomCatalog().find(c => c.id === symptomEditItem.id) || {}).label || symptomEditItem.id, timeInputValue(symptomEditItem.loggedAt))
+    : '';
+
+  const moodEditItem = timeEditTarget && timeEditTarget.kind === 'mood'
+    ? entry.moods.find(m => m.id === timeEditTarget.id) : null;
+  const moodEditHTML = moodEditItem
+    ? timeEditorHTML((moodCatalog().find(c => c.id === moodEditItem.id) || {}).label || moodEditItem.id, timeInputValue(moodEditItem.loggedAt))
+    : '';
+
   return `
     <div class="day-sheet-section">
+      <p class="day-sheet-section-title">Notiz zum Tag</p>
+      <textarea class="day-note-textarea" id="dayNoteTextarea" placeholder="z.B. besonderer Anlass, Krankheit, Medikamente …">${escapeAttr(dayNoteDraft)}</textarea>
+    </div>
+
+    <div class="day-sheet-section">
       <p class="day-sheet-section-title">Schmerzen</p>
+      <p class="day-sheet-hint">Zum Bearbeiten der Uhrzeit einen Eintrag lange gedrückt halten.</p>
       <div class="pain-entry-list" id="painEntryList">${painEntryListHTML(entry)}</div>
-      ${painDraft ? painSubformHTML(painDraft) : '<button type="button" class="day-sheet-add-btn" id="addPainEntryBtn">+ Schmerz hinzufügen</button>'}
+      ${painBottomHTML}
     </div>
 
     <div class="day-sheet-section">
       <p class="day-sheet-section-title">Symptome</p>
+      <p class="day-sheet-hint">Zum Bearbeiten der Uhrzeit ein ausgewähltes Symptom lange gedrückt halten.</p>
       <div class="chip-row" id="symptomChipRow">${chipRowHTML(symptomCatalog(), entry.symptoms.map(s => s.id), 'symptom')}</div>
       ${selectedItemsTimeHTML(symptomCatalog(), entry.symptoms)}
+      ${symptomEditHTML}
       <div class="chip-add-row">
         <input type="text" class="chip-add-input" id="symptomCustomInput" placeholder="Eigenes Symptom …">
         <button type="button" class="chip-add-btn" id="symptomCustomAddBtn">+</button>
@@ -364,8 +433,10 @@ function daySheetBodyHTML(iso){
 
     <div class="day-sheet-section">
       <p class="day-sheet-section-title">Stimmung</p>
+      <p class="day-sheet-hint">Zum Bearbeiten der Uhrzeit eine ausgewählte Stimmung lange gedrückt halten.</p>
       <div class="chip-row" id="moodChipRow">${chipRowHTML(moodCatalog(), entry.moods.map(m => m.id), 'mood')}</div>
       ${selectedItemsTimeHTML(moodCatalog(), entry.moods)}
+      ${moodEditHTML}
       <div class="chip-add-row">
         <input type="text" class="chip-add-input" id="moodCustomInput" placeholder="Eigene Stimmung …">
         <button type="button" class="chip-add-btn" id="moodCustomAddBtn">+</button>
@@ -386,9 +457,16 @@ function renderDaySheetContent(){
 }
 
 function wireDaySheetBody(){
+  const dayNoteTextarea = document.getElementById('dayNoteTextarea');
+  if (dayNoteTextarea) dayNoteTextarea.oninput = () => { dayNoteDraft = dayNoteTextarea.value; };
+  if (dayNoteTextarea) dayNoteTextarea.onblur = () => {
+    State.dayLogs = new Map(setDayNote(daySheetISO, dayNoteDraft).map(e => [e.date, e]));
+  };
+
   const addBtn = document.getElementById('addPainEntryBtn');
   if (addBtn) addBtn.onclick = () => {
     painDraft = { category: null, intensity: 5, timeOfDay: null, note: '' };
+    timeEditTarget = null;
     renderDaySheetContent();
   };
 
@@ -428,19 +506,61 @@ function wireDaySheetBody(){
       renderDaySheetContent();
     };
   });
+  // Langer Druck auf einen Schmerz-Eintrag öffnet den Zeit-Editor für genau
+  // diesen Eintrag (siehe timeEditorHTML() oben) — ein kurzer Tap tut nichts
+  // (nur der ×-Button innerhalb der Zeile reagiert auf normale Taps).
+  document.querySelectorAll('.pain-entry-row').forEach(row => {
+    attachLongPress(row, () => {
+      painDraft = null;
+      timeEditTarget = { kind: 'pain', id: row.dataset.entryId };
+      renderDaySheetContent();
+    });
+  });
 
   document.querySelectorAll('#symptomChipRow .chip').forEach(chip => {
     chip.onclick = () => {
       State.dayLogs = new Map(toggleSymptomEntry(daySheetISO, chip.dataset.symptom).map(e => [e.date, e]));
       renderDaySheetContent();
     };
+    // Langer Druck öffnet den Zeit-Editor NUR für ein bereits ausgewähltes
+    // Symptom (sonst gäbe es noch keine Uhrzeit zu bearbeiten) — ein nicht
+    // ausgewähltes Symptom reagiert auf langen Druck genauso wie auf einen
+    // normalen Tap (schaltet es an).
+    attachLongPress(chip, () => {
+      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+      if (!entry.symptoms.some(s => s.id === chip.dataset.symptom)) return;
+      timeEditTarget = { kind: 'symptom', id: chip.dataset.symptom };
+      renderDaySheetContent();
+    });
   });
   document.querySelectorAll('#moodChipRow .chip').forEach(chip => {
     chip.onclick = () => {
       State.dayLogs = new Map(toggleMoodEntry(daySheetISO, chip.dataset.mood).map(e => [e.date, e]));
       renderDaySheetContent();
     };
+    attachLongPress(chip, () => {
+      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+      if (!entry.moods.some(m => m.id === chip.dataset.mood)) return;
+      timeEditTarget = { kind: 'mood', id: chip.dataset.mood };
+      renderDaySheetContent();
+    });
   });
+
+  const timeEditorInput = document.getElementById('timeEditorInput');
+  const timeEditorCancelBtn = document.getElementById('timeEditorCancelBtn');
+  if (timeEditorCancelBtn) timeEditorCancelBtn.onclick = () => { timeEditTarget = null; renderDaySheetContent(); };
+  const timeEditorSaveBtn = document.getElementById('timeEditorSaveBtn');
+  if (timeEditorSaveBtn) timeEditorSaveBtn.onclick = () => {
+    const value = timeEditorInput.value;
+    if (!value) return;
+    let updated;
+    if (timeEditTarget.kind === 'pain') updated = updatePainEntryTime(daySheetISO, timeEditTarget.id, value);
+    else if (timeEditTarget.kind === 'symptom') updated = updateSymptomTime(daySheetISO, timeEditTarget.id, value);
+    else updated = updateMoodTime(daySheetISO, timeEditTarget.id, value);
+    State.dayLogs = new Map(updated.map(e => [e.date, e]));
+    timeEditTarget = null;
+    renderDaySheetContent();
+  };
 
   const addSymptomBtn = document.getElementById('symptomCustomAddBtn');
   const symptomInput = document.getElementById('symptomCustomInput');
@@ -477,6 +597,8 @@ function openDayDetailSheet(iso){
   closeDaySheet();
   daySheetISO = iso;
   painDraft = null;
+  timeEditTarget = null;
+  dayNoteDraft = (State.dayLogs.get(iso) || {}).note || '';
   const date = parseISODate(iso);
 
   const backdrop = document.createElement('div');
@@ -504,9 +626,17 @@ function openDayDetailSheet(iso){
 
 function closeDaySheet(){
   const backdrop = document.getElementById('daySheetBackdrop');
+  if (backdrop && daySheetISO){
+    // Ungespeicherte Notiz-Änderung beim Schließen noch sichern (z.B. Tap
+    // direkt auf den abgedunkelten Hintergrund feuert keine Blur-Reihenfolge,
+    // die zuverlässig VOR dem Entfernen des Sheets greift).
+    State.dayLogs = new Map(setDayNote(daySheetISO, dayNoteDraft).map(e => [e.date, e]));
+  }
   if (backdrop) backdrop.remove();
   daySheetISO = null;
   painDraft = null;
+  timeEditTarget = null;
+  dayNoteDraft = '';
 }
 
 // Ein delegierter Klick-Handler auf dem Monats-Container statt Wiring pro Tageszelle:

@@ -9,7 +9,7 @@
 
 const APP_DATA = {
   APP_NAME: 'Ciclo',
-  APP_VERSION: '0.1.0',
+  APP_VERSION: '0.2.0',
 
   // Zentrale Storage-Keys (Single Source of Truth für 01-storage.js). Bleiben
   // bewusst beim alten "tracker_"-Präfix aus der Zeit vor der Umbenennung zu
@@ -121,6 +121,19 @@ const APP_DATA = {
   // Lila-Ton) und gegen --color-accent/--color-period-* jedes Themas abgesetzt,
   // damit Schmerztage im Kalender klar erkennbar UND spürbar zum Thema passend
   // wirken statt einfach nur "mitgefärbt" zu sein.
+  // Kuratierte Palette erdig-pastelliger Farben für "Eigene Farbe" (5. Option
+  // neben den vier festen Farbthemen, siehe customPaletteHTML() in 09-
+  // settings.js). Jede Farbe hier ist bewusst gedeckt/pastellig genug, dass
+  // generateEarthyTheme() (03-utils.js) daraus ein stimmiges Hell/Dunkel-
+  // Variablenpaar ableiten kann, ohne dass Nutzer:innen selbst auf Sättigung/
+  // Kontrast achten müssen.
+  EARTHY_PALETTE: [
+    '#D8C3A5', '#D98E73', '#A8B79B', '#C97C5D', '#D9A8A0', '#8A9A5B',
+    '#A6A57A', '#DCB876', '#B8A798', '#C9BBAE', '#BE6A4D', '#E3B8B0',
+    '#E3CFA0', '#B0AFA3', '#7E9575', '#E6B98C', '#B79AA0', '#BFAF7D',
+    '#A97155', '#A9C1B0', '#9DB0B8', '#B9805F', '#A98A93', '#D9A855'
+  ],
+
   THEME_PRESETS: [
     {
       id: 'sand',
@@ -280,29 +293,52 @@ const APP_DATA = {
     }
   ],
 
-  // Zentrale Liste aller Stats-/Chart-Elemente, die per langem Druck ausgeblendet
-  // werden können (siehe hideItem()/showItem() in 02-state-theme.js). Jede id
-  // taucht als data-vis-id im jeweiligen Karten-Markup auf (08-stats-progress.js,
-  // 07-chart.js) UND als Zeile in der "Sichtbare Bereiche"-Liste in den
-  // Einstellungen (09-settings.js) — eine Quelle für beide Stellen, damit nichts
-  // auseinanderlaufen kann.
-  VISIBILITY_ITEMS: [
-    { id: 'stat-avgCycle', label: 'Ø Zykluslänge (Stats)' },
-    { id: 'stat-avgPeriod', label: 'Ø Periodendauer (Stats)' },
-    { id: 'stat-regularity', label: 'Regelmäßigkeit (Stats)' },
-    { id: 'stat-lastPeriod', label: 'Letzte Periode (Stats)' },
-    { id: 'stat-nextPeriod', label: 'Nächste Periode (Stats)' },
-    { id: 'stat-fertileWindow', label: 'Fruchtbares Fenster (Stats)' },
-    { id: 'stat-ovulation', label: 'Geschätzter Eisprung (Stats)' },
-    { id: 'stat-painTotal', label: 'Schmerz-Einträge insgesamt (Stats)' },
-    { id: 'stat-painIntensity', label: 'Ø Schmerzintensität (Stats)' },
-    { id: 'stat-topSymptoms', label: 'Häufigste Symptome (Stats)' },
-    { id: 'stat-topMoods', label: 'Häufigste Stimmungen (Stats)' },
-    { id: 'chart-periodLength', label: 'Periodendauer-Diagramm (Chart)' },
-    { id: 'chart-cycleLength', label: 'Zykluslängen-Diagramm (Chart)' },
-    { id: 'chart-painPhase', label: 'Schmerzen-nach-Phase-Diagramm (Chart)' },
-    { id: 'chart-painTimeOfDay', label: 'Schmerzen-nach-Tageszeit-Diagramm (Chart)' },
-    { id: 'chart-symptomsByPhase', label: 'Symptome-nach-Phase-Diagramm (Chart)' },
-    { id: 'chart-moodsByPhase', label: 'Stimmung-nach-Phase-Diagramm (Chart)' }
+  // Zentrale, nach Themenbereich GRUPPIERTE Liste aller Stats-/Chart-Elemente,
+  // die per langem Druck ausgeblendet werden können (siehe hideItem()/
+  // showItem() in 02-state-theme.js). Jede id taucht als data-vis-id im
+  // jeweiligen Karten-Markup auf (08-stats-progress.js, 07-chart.js) UND als
+  // Zeile unter ihrer Gruppen-Überschrift in "Sichtbare Bereiche" (09-
+  // settings.js) — eine Quelle für beide Stellen, damit nichts auseinander-
+  // läuft. Gruppierung rein für die Anzeige in den Einstellungen (sonst wäre
+  // die Liste dort unübersichtlich lang); isItemHidden()/hideItem()/showItem()
+  // arbeiten weiterhin nur mit der flachen id, unabhängig von der Gruppe.
+  VISIBILITY_GROUPS: [
+    {
+      id: 'cycle',
+      label: 'Zyklus',
+      items: [
+        { id: 'stat-avgCycle', label: 'Ø Zykluslänge (Stats)' },
+        { id: 'stat-avgPeriod', label: 'Ø Periodendauer (Stats)' },
+        { id: 'stat-regularity', label: 'Regelmäßigkeit (Stats)' },
+        { id: 'stat-lastPeriod', label: 'Letzte Periode (Stats)' },
+        { id: 'stat-nextPeriod', label: 'Nächste Periode (Stats)' },
+        { id: 'stat-fertileWindow', label: 'Fruchtbares Fenster (Stats)' },
+        { id: 'stat-ovulation', label: 'Geschätzter Eisprung (Stats)' }
+      ]
+    },
+    {
+      id: 'symptoms',
+      label: 'Beschwerden',
+      items: [
+        { id: 'stat-painTotal', label: 'Schmerz-Einträge insgesamt (Stats)' },
+        { id: 'stat-painIntensity', label: 'Ø Schmerzintensität (Stats)' },
+        { id: 'stat-topSymptoms', label: 'Häufigste Symptome (Stats)' },
+        { id: 'stat-topMoods', label: 'Häufigste Stimmungen (Stats)' },
+        { id: 'stat-patternInsight', label: 'Erkannte Muster (Stats)' }
+      ]
+    },
+    {
+      id: 'charts',
+      label: 'Diagramme',
+      items: [
+        { id: 'chart-periodLength', label: 'Periodendauer-Diagramm (Chart)' },
+        { id: 'chart-cycleLength', label: 'Zykluslängen-Diagramm (Chart)' },
+        { id: 'chart-cycleTrend', label: 'Zykluslängen-Trend (Chart)' },
+        { id: 'chart-painPhase', label: 'Schmerzen-nach-Phase-Diagramm (Chart)' },
+        { id: 'chart-painTimeOfDay', label: 'Schmerzen-nach-Tageszeit-Diagramm (Chart)' },
+        { id: 'chart-symptomsByPhase', label: 'Symptome-nach-Phase-Diagramm (Chart)' },
+        { id: 'chart-moodsByPhase', label: 'Stimmung-nach-Phase-Diagramm (Chart)' }
+      ]
+    }
   ]
 };

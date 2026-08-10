@@ -95,6 +95,78 @@ function categoryBarChartSVG(entries, barColorVar){
   return `<svg class="chart-svg" viewBox="0 0 ${svgWidth} ${svgHeight}" width="${svgWidth}" height="${svgHeight}">${bars}</svg>`;
 }
 
+/** Liniendiagramm mit sanfter Farbverlauf-Fläche unter der Linie, Punkten je
+    Wert und optionaler gestrichelter Trend-Gerade (computeLinearTrend(),
+    03-utils.js) — für den "Trend statt nur Durchschnitt"-Blick auf die
+    Zykluslänge über die Zeit (im Gegensatz zu barChartSVG() oben, das jeden
+    einzelnen Wert exakt zeigt, aber keine Richtung erkennen lässt).
+    entries: [{ label, value }], colorVar: CSS-Custom-Property für Linie/
+    Fläche, trend: { slope, intercept } | null. */
+function lineChartSVG(entries, colorVar, trend){
+  const stepX = 52;
+  const paddingX = 24;
+  const chartHeight = 110;
+  const paddingTop = 26;
+  const paddingBottom = 26;
+  const svgHeight = paddingTop + chartHeight + paddingBottom;
+  const svgWidth = Math.max(entries.length - 1, 0) * stepX + paddingX * 2;
+
+  const values = entries.map(e => e.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const range = (maxValue - minValue) || 1;
+  const pad = range * 0.2 || 2;
+  const scaleMin = minValue - pad;
+  const scaleRange = (maxValue + pad) - scaleMin || 1;
+
+  const xFor = i => paddingX + i * stepX;
+  const yFor = v => paddingTop + chartHeight - ((v - scaleMin) / scaleRange) * chartHeight;
+
+  const points = entries.map((e, i) => ({ x: xFor(i), y: yFor(e.value), value: e.value, label: e.label }));
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  const baseline = paddingTop + chartHeight;
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${baseline} L ${points[0].x} ${baseline} Z`;
+  const gradientId = 'lineGradient' + Math.random().toString(36).slice(2, 8);
+
+  const dotsAndLabels = points.map(p => `
+    <circle cx="${p.x}" cy="${p.y}" r="4" style="fill:var(${colorVar})"></circle>
+    <text x="${p.x}" y="${p.y - 10}" text-anchor="middle" class="chart-value-label">${p.value}</text>
+    <text x="${p.x}" y="${baseline + 18}" text-anchor="middle" class="chart-axis-label">${p.label}</text>
+  `).join('');
+
+  let trendLineHTML = '';
+  if (trend && points.length >= 2){
+    const yStart = yFor(trend.intercept);
+    const yEnd = yFor(trend.intercept + trend.slope * (points.length - 1));
+    trendLineHTML = `<line x1="${points[0].x}" y1="${yStart}" x2="${points[points.length - 1].x}" y2="${yEnd}" class="chart-trend-line"></line>`;
+  }
+
+  return `
+    <svg class="chart-svg" viewBox="0 0 ${svgWidth} ${svgHeight}" width="${svgWidth}" height="${svgHeight}">
+      <defs>
+        <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" style="stop-color:var(${colorVar});stop-opacity:0.28"></stop>
+          <stop offset="100%" style="stop-color:var(${colorVar});stop-opacity:0"></stop>
+        </linearGradient>
+      </defs>
+      <path d="${areaPath}" fill="url(#${gradientId})" stroke="none"></path>
+      ${trendLineHTML}
+      <path d="${linePath}" fill="none" style="stroke:var(${colorVar})" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
+      ${dotsAndLabels}
+    </svg>
+  `;
+}
+
+/** Kurzer, menschenlesbarer Satz zur Trend-Richtung (computeLinearTrend(),
+    03-utils.js) für die Zykluslängen-Trend-Karte. Unter 0,15 Tage/Zyklus
+    Steigung gilt der Zyklus als praktisch stabil — sonst würde jede winzige,
+    bedeutungslose Schwankung als "Trend" formuliert. */
+function cycleTrendDescription(slope){
+  if (Math.abs(slope) < 0.15) return 'Deine Zykluslänge ist über die Zeit stabil geblieben.';
+  const direction = slope > 0 ? 'verlängert' : 'verkürzt';
+  return `Deine Zykluslänge hat sich im Schnitt um ${fmtDaysAvg(Math.abs(slope))} Tage je Zyklus ${direction}.`;
+}
+
 function chartCardHTML(id, title, subtitle, bodyHTML, avgLabel){
   if (isItemHidden(id)) return '';
   return `
@@ -133,6 +205,7 @@ function chartBodyHTML(){
   );
 
   let cycleCard;
+  let cycleTrendCard = '';
   if (cycleLengths.length){
     const cycleEntries = cycleLengths.map(c => ({ label: fmtDateShort(parseISODate(c.start)), value: c.length }));
     const avgCycle = average(cycleLengths.map(c => c.length));
@@ -143,6 +216,19 @@ function chartBodyHTML(){
       barChartSVG(cycleEntries, '--color-accent', avgCycle),
       `Ø ${fmtDaysAvg(avgCycle)} Tage`
     );
+
+    if (cycleLengths.length >= 2 && !isItemHidden('chart-cycleTrend')){
+      const trend = computeLinearTrend(cycleEntries.map(e => e.value));
+      cycleTrendCard = `
+        <div class="chart-card" data-vis-id="chart-cycleTrend">
+          <div class="chart-card-header">
+            <span class="chart-card-title">Zykluslänge – Trend</span>
+          </div>
+          <p class="chart-card-subtitle">${trend ? cycleTrendDescription(trend.slope) : 'Verlauf über die Zeit'}</p>
+          <div class="chart-scroll-x">${lineChartSVG(cycleEntries, '--color-accent', trend)}</div>
+        </div>
+      `;
+    }
   } else if (!isItemHidden('chart-cycleLength')) {
     cycleCard = `
       <div class="chart-card" data-vis-id="chart-cycleLength">
@@ -167,6 +253,7 @@ function chartBodyHTML(){
           <span class="chart-card-title">Schmerzen nach Zyklusphase</span>
         </div>
         <p class="chart-card-subtitle">Wie viele Schmerz-Einträge in welche Phase fallen</p>
+        ${painPhaseStats.dominant ? `<p class="chart-card-insight">Am häufigsten in: ${painPhaseStats.dominant}</p>` : ''}
         <div class="chart-scroll-x">${categoryBarChartSVG(painPhaseEntries, '--color-pain')}</div>
       </div>
     `;
@@ -198,6 +285,7 @@ function chartBodyHTML(){
           <span class="chart-card-title">Symptome nach Zyklusphase</span>
         </div>
         <p class="chart-card-subtitle">Wie oft erfasste Symptome in welche Phase fallen</p>
+        ${symptomPhaseStats.dominant ? `<p class="chart-card-insight">Am häufigsten in: ${symptomPhaseStats.dominant}</p>` : ''}
         <div class="chart-scroll-x">${categoryBarChartSVG(symptomPhaseEntries, '--color-accent')}</div>
       </div>
     `;
@@ -214,12 +302,13 @@ function chartBodyHTML(){
           <span class="chart-card-title">Stimmung nach Zyklusphase</span>
         </div>
         <p class="chart-card-subtitle">Wie oft erfasste Stimmungen in welche Phase fallen</p>
+        ${moodPhaseStats.dominant ? `<p class="chart-card-insight">Am häufigsten in: ${moodPhaseStats.dominant}</p>` : ''}
         <div class="chart-scroll-x">${categoryBarChartSVG(moodPhaseEntries, '--color-text-heading')}</div>
       </div>
     `;
   }
 
-  return `<div class="chart-view-scroll">${periodCard}${cycleCard}${painPhaseCard}${painTimeCard}${symptomsPhaseCard}${moodsPhaseCard}</div>`;
+  return `<div class="chart-view-scroll">${periodCard}${cycleCard}${cycleTrendCard}${painPhaseCard}${painTimeCard}${symptomsPhaseCard}${moodsPhaseCard}</div>`;
 }
 
 function renderChartView(){

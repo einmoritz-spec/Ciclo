@@ -77,14 +77,17 @@ function nowStamp(){
     Form: jeder Schmerz-Eintrag bekommt garantiert `note`/`loggedAt` (fehlen bei
     älteren, bereits migrierten Installationen), jeder Symptom-/Stimmungs-
     Eintrag wird von einer reinen ID (Vorversion ohne Zeiterfassung) zu einem
-    { id, loggedAt }-Objekt normalisiert. Macht loadDayLogs() unabhängig davon,
-    aus welcher App-Version die gespeicherten Daten stammen. */
+    { id, loggedAt }-Objekt normalisiert, und jeder Tag bekommt garantiert ein
+    `note`-Feld (freie Text-Notiz für den GANZEN Tag, unabhängig von der
+    Schmerz-Notiz — siehe setDayNote() unten). Macht loadDayLogs() unabhängig
+    davon, aus welcher App-Version die gespeicherten Daten stammen. */
 function normalizeDayLogs(dayLogs){
   const normalizeTagged = (list) => (list || []).map(item =>
     typeof item === 'string' ? { id: item, loggedAt: null } : { id: item.id, loggedAt: item.loggedAt ?? null }
   );
   return dayLogs.map(entry => ({
     date: entry.date,
+    note: entry.note ?? null,
     pain: (entry.pain || []).map(p => ({
       id: p.id || generateEntryId('p'),
       category: p.category ?? null,
@@ -116,7 +119,7 @@ function _loadLegacyPainDays(){
 
 /** Leerer Tages-Log als Ausgangspunkt für getDayEntry()/upsertDayEntry(). */
 function emptyDayEntry(iso){
-  return { date: iso, pain: [], symptoms: [], moods: [] };
+  return { date: iso, note: null, pain: [], symptoms: [], moods: [] };
 }
 
 /** Lädt alle Tages-Logs (Schmerz-Einträge + Symptome + Stimmungen je Datum,
@@ -149,7 +152,7 @@ function loadDayLogs(){
     const pain = categories.length
       ? categories.map(cat => ({ id: generateEntryId('p'), category: cat, intensity: null, timeOfDay: null, note: null, loggedAt: null }))
       : [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null, note: null, loggedAt: null }];
-    return { date: old.date, pain, symptoms: [], moods: [] };
+    return { date: old.date, note: null, pain, symptoms: [], moods: [] };
   });
   migrated.sort((a, b) => a.date.localeCompare(b.date));
   saveDayLogs(migrated);
@@ -184,7 +187,7 @@ function upsertDayEntry(iso, mutate){
   if (!entry) entry = emptyDayEntry(iso);
   mutate(entry);
 
-  const isEmpty = !entry.pain.length && !entry.symptoms.length && !entry.moods.length;
+  const isEmpty = !entry.note && !entry.pain.length && !entry.symptoms.length && !entry.moods.length;
   const idx = dayLogs.findIndex(e => e.date === iso);
   if (isEmpty){
     if (idx !== -1) dayLogs.splice(idx, 1);
@@ -258,6 +261,52 @@ function toggleMoodEntry(iso, moodId){
   });
 }
 
+/** Baut einen ISO-Zeitstempel aus einem Kalendertag (iso) + einer manuell
+    gewählten Uhrzeit (hhmm, 'HH:MM') — für die nachträgliche Korrektur der
+    automatisch erfassten Uhrzeit (langer Druck auf einen Schmerz-Eintrag/
+    Symptom-/Stimmungs-Chip, siehe openTimeEditor() in 04-calendar.js). Nutzt
+    denselben Kalendertag wie der Eintrag, nur die Uhrzeit wird übernommen. */
+function stampFromDateAndTime(iso, hhmm){
+  const [h, m] = (hhmm || '00:00').split(':').map(Number);
+  const d = parseISODate(iso);
+  d.setHours(h || 0, m || 0, 0, 0);
+  return d.toISOString();
+}
+
+/** Überschreibt die automatisch erfasste Uhrzeit (loggedAt) eines bestehenden
+    Schmerz-Eintrags manuell — z.B. wenn der Schmerz schon früher aufgetreten
+    ist, als er eingetragen wurde. */
+function updatePainEntryTime(iso, entryId, hhmm){
+  return upsertDayEntry(iso, entry => {
+    const item = entry.pain.find(p => p.id === entryId);
+    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
+  });
+}
+
+/** Wie updatePainEntryTime(), für ein bereits ausgewähltes Symptom. */
+function updateSymptomTime(iso, symptomId, hhmm){
+  return upsertDayEntry(iso, entry => {
+    const item = entry.symptoms.find(s => s.id === symptomId);
+    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
+  });
+}
+
+/** Setzt/löscht die freie Tages-Notiz (unabhängig von der Schmerz-Notiz bei
+    Kategorie "Sonstige") — z.B. für "war krank", "Geburtstag gefeiert" o.ä.
+    Leerer/nur-Leerzeichen-Text entfernt die Notiz wieder (null). */
+function setDayNote(iso, text){
+  const trimmed = (text || '').trim();
+  return upsertDayEntry(iso, entry => { entry.note = trimmed || null; });
+}
+
+/** Wie updatePainEntryTime(), für eine bereits ausgewählte Stimmung. */
+function updateMoodTime(iso, moodId, hhmm){
+  return upsertDayEntry(iso, entry => {
+    const item = entry.moods.find(m => m.id === moodId);
+    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
+  });
+}
+
 /** Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (Detailgrad
     "Detailliert" -> "+ Eigenes"), ergänzen die feste Liste aus
     APP_DATA.SYMPTOM_CATEGORIES / APP_DATA.MOOD_CATEGORIES dauerhaft. */
@@ -299,6 +348,39 @@ function addCustomMood(label){
   customItems.moods.push(item);
   saveCustomItems(customItems);
   return { customItems, item };
+}
+
+/** Benennt einen eigenen Symptom-/Stimmungs-Chip um (Einstellungen -> Eigene
+    Kategorien). Da Tages-Logs nur die id speichern und das Label immer live
+    aus dem Katalog aufgelöst wird (symptomCatalog()/moodCatalog(), 02-state-
+    theme.js), reicht eine Änderung hier — bereits erfasste Tage zeigen danach
+    automatisch das neue Label, ohne dass irgendwelche Tages-Logs angefasst
+    werden müssen. field: 'symptoms' | 'moods'. */
+function renameCustomItem(field, id, newLabel){
+  const customItems = loadCustomItems();
+  const item = customItems[field].find(i => i.id === id);
+  if (item) item.label = newLabel.trim();
+  saveCustomItems(customItems);
+  return customItems;
+}
+
+/** Entfernt einen eigenen Symptom-/Stimmungs-Chip komplett — anders als beim
+    Umbenennen reicht eine Änderung am Katalog hier NICHT: die id würde sonst
+    in bereits erfassten Tagen als "Geister"-Eintrag ohne auflösbares Label
+    hängen bleiben. Deshalb wird die id zusätzlich aus JEDEM Tages-Log entfernt
+    (löscht die Vergangenheit dieses Chips mit, statt sie nur unsichtbar zu
+    machen — bewusste Entscheidung, da ein gelöschter eigener Chip i.d.R. ein
+    Tippfehler oder Fehlversuch war und nicht rückwirkend Sinn ergibt). */
+function deleteCustomItem(field, id){
+  const customItems = loadCustomItems();
+  customItems[field] = customItems[field].filter(i => i.id !== id);
+  saveCustomItems(customItems);
+
+  const dayLogs = loadDayLogs();
+  dayLogs.forEach(entry => { entry[field] = entry[field].filter(i => i.id !== id); });
+  saveDayLogs(dayLogs);
+
+  return { customItems, dayLogs };
 }
 
 function loadThemeOverrides() {
@@ -375,7 +457,7 @@ function importAllData(data) {
       const pain = categories.length
         ? categories.map(cat => ({ id: generateEntryId('p'), category: cat, intensity: null, timeOfDay: null }))
         : [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null }];
-      return { date: old.date, pain, symptoms: [], moods: [] };
+      return { date: old.date, note: null, pain, symptoms: [], moods: [] };
     });
     saveDayLogs(migrated);
   }
