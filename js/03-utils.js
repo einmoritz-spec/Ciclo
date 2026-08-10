@@ -39,6 +39,26 @@ function getMonthLabel(year, month0){
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+/** 'HH:MM' aus einem ISO-Zeitstempel (loggedAt, siehe nowStamp() in
+    01-storage.js) in lokaler Zeit — für die automatisch erfasste Uhrzeit eines
+    Schmerz-/Symptom-/Stimmungs-Eintrags (04-calendar.js). null bei fehlendem
+    Zeitstempel (ältere, migrierte Einträge ohne Erfassungszeit). */
+function fmtTimeShort(iso){
+  if (!iso) return null;
+  return new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Escaped einen String für die sichere Verwendung als HTML-Attributwert
+    (z.B. der Notiz-Text eines "Sonstige"-Schmerz-Eintrags, der beim Neu-
+    Rendern des Sheets als value="..." wieder eingesetzt wird). */
+function escapeAttr(str){
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /** year/month0 (0-basiert) um n Monate verschieben -> { year, month } */
 function shiftYearMonth(year, month0, n){
   const d = new Date(year, month0 + n, 1);
@@ -360,11 +380,13 @@ function computePainStats(periods, dayLogsArray){
 }
 
 /** Zählt, wie oft jede Symptom-/Stimmungs-ID über alle Tages-Logs hinweg
-    vorkommt (id -> Anzahl Tage). field: 'symptoms' | 'moods'. */
+    vorkommt (id -> Anzahl Tage). field: 'symptoms' | 'moods'. Einträge sind
+    { id, loggedAt }-Objekte (siehe toggleSymptomEntry()/toggleMoodEntry() in
+    01-storage.js), nur die id fließt in die Zählung ein. */
 function computeItemFrequency(dayLogsArray, field){
   const counts = {};
   dayLogsArray.forEach(day => {
-    (day[field] || []).forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+    (day[field] || []).forEach(item => { counts[item.id] = (counts[item.id] || 0) + 1; });
   });
   return counts;
 }

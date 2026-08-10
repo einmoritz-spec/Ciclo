@@ -246,16 +246,22 @@ function handleDayLongPress(iso){
 }
 
 /** Formatiert einen einzelnen Schmerz-Eintrag für die Liste im Sheet, z.B.
-    "Unterleib · 7/10 · Abends" — fehlende Angaben (Intensität/Tageszeit noch
-    nicht gesetzt, Kategorie im "Schnell"-Modus generisch) werden ausgelassen
-    statt Platzhalter anzuzeigen. */
+    "Unterleib · 7/10 · Abends · erfasst 14:32" — fehlende Angaben (Intensität/
+    Tageszeit noch nicht gesetzt, Kategorie im "Schnell"-Modus generisch)
+    werden ausgelassen statt Platzhalter anzuzeigen. Bei Kategorie "Sonstige"
+    wird die frei eingegebene Notiz mit angezeigt; die Erfassungszeit
+    (loggedAt) wird IMMER automatisch gesetzt (siehe addPainEntry(),
+    01-storage.js) und ist damit bei jedem neuen Eintrag vorhanden. */
 function painEntryLabel(entry){
   const parts = [];
   const cat = APP_DATA.PAIN_CATEGORIES.find(c => c.id === entry.category);
   parts.push(cat ? cat.label : 'Allgemein');
+  if (entry.category === 'sonstige' && entry.note) parts.push(entry.note);
   if (entry.intensity != null) parts.push(`${entry.intensity}/10`);
   const time = APP_DATA.PAIN_TIME_OF_DAY.find(t => t.id === entry.timeOfDay);
   if (time) parts.push(time.label);
+  const loggedTime = fmtTimeShort(entry.loggedAt);
+  if (loggedTime) parts.push(`erfasst ${loggedTime}`);
   return parts.join(' · ');
 }
 
@@ -273,8 +279,9 @@ function painEntryListHTML(entry){
 
 /** Kleines Unterformular zum Anlegen EINES neuen Schmerz-Eintrags: Kategorie
     (Einfachauswahl-Chips), Intensität (Schieberegler 1–10), Tageszeit
-    (Einfachauswahl-Chips). Wird nur gezeigt, wenn draft nicht null ist (Tap auf
-    "+ Schmerz hinzufügen", siehe wireDaySheet()). */
+    (Einfachauswahl-Chips) und — nur bei Kategorie "Sonstige" — ein freies
+    Textfeld für eine kurze Beschreibung. Wird nur gezeigt, wenn draft nicht
+    null ist (Tap auf "+ Schmerz hinzufügen", siehe wireDaySheet()). */
 function painSubformHTML(draft){
   if (!draft) return '';
   const catChips = APP_DATA.PAIN_CATEGORIES.map(c => `
@@ -283,10 +290,15 @@ function painSubformHTML(draft){
   const timeChips = APP_DATA.PAIN_TIME_OF_DAY.map(t => `
     <button type="button" class="chip${draft.timeOfDay === t.id ? ' is-selected' : ''}" data-draft-time="${t.id}">${t.label}</button>
   `).join('');
+  const noteFieldHTML = draft.category === 'sonstige' ? `
+    <p class="pain-subform-label">Was genau?</p>
+    <input type="text" class="chip-add-input" id="painDraftNote" placeholder="Kurze Beschreibung …" value="${escapeAttr(draft.note || '')}">
+  ` : '';
   return `
     <div class="pain-subform" id="painSubform">
       <p class="pain-subform-label">Wo?</p>
       <div class="chip-row">${catChips}</div>
+      ${noteFieldHTML}
       <p class="pain-subform-label">Wie stark? <strong>${draft.intensity}/10</strong></p>
       <input type="range" min="1" max="10" step="1" value="${draft.intensity}" class="intensity-slider" id="painDraftIntensity">
       <p class="pain-subform-label">Wann?</p>
@@ -303,6 +315,22 @@ function chipRowHTML(catalog, selectedIds, dataAttr){
   return catalog.map(item => `
     <button type="button" class="chip${selectedIds.includes(item.id) ? ' is-selected' : ''}" data-${dataAttr}="${item.id}">${item.label}</button>
   `).join('');
+}
+
+/** Kleiner, gedämpfter Hinweistext unter einer Chip-Reihe: listet für die
+    AKTUELL ausgewählten Symptome/Stimmungen, wann sie erfasst wurden — damit
+    sich (wie bei Schmerz-Einträgen) später nachvollziehen lässt, wann genau
+    etwas eingetreten ist. Nur einzelne Uhrzeit pro Item (loggedAt), kein
+    Verlauf über mehrfaches An-/Ausschalten hinweg. */
+function selectedItemsTimeHTML(catalog, selectedItems){
+  if (!selectedItems.length) return '';
+  const parts = selectedItems.map(sel => {
+    const item = catalog.find(c => c.id === sel.id);
+    const label = item ? item.label : sel.id;
+    const time = fmtTimeShort(sel.loggedAt);
+    return time ? `${label} ${time}` : label;
+  });
+  return `<p class="day-sheet-time-hint">Erfasst: ${parts.join(', ')}</p>`;
 }
 
 // Laufender Entwurf für einen neuen Schmerz-Eintrag im offenen Sheet (null =
@@ -326,7 +354,8 @@ function daySheetBodyHTML(iso){
 
     <div class="day-sheet-section">
       <p class="day-sheet-section-title">Symptome</p>
-      <div class="chip-row" id="symptomChipRow">${chipRowHTML(symptomCatalog(), entry.symptoms, 'symptom')}</div>
+      <div class="chip-row" id="symptomChipRow">${chipRowHTML(symptomCatalog(), entry.symptoms.map(s => s.id), 'symptom')}</div>
+      ${selectedItemsTimeHTML(symptomCatalog(), entry.symptoms)}
       <div class="chip-add-row">
         <input type="text" class="chip-add-input" id="symptomCustomInput" placeholder="Eigenes Symptom …">
         <button type="button" class="chip-add-btn" id="symptomCustomAddBtn">+</button>
@@ -335,7 +364,8 @@ function daySheetBodyHTML(iso){
 
     <div class="day-sheet-section">
       <p class="day-sheet-section-title">Stimmung</p>
-      <div class="chip-row" id="moodChipRow">${chipRowHTML(moodCatalog(), entry.moods, 'mood')}</div>
+      <div class="chip-row" id="moodChipRow">${chipRowHTML(moodCatalog(), entry.moods.map(m => m.id), 'mood')}</div>
+      ${selectedItemsTimeHTML(moodCatalog(), entry.moods)}
       <div class="chip-add-row">
         <input type="text" class="chip-add-input" id="moodCustomInput" placeholder="Eigene Stimmung …">
         <button type="button" class="chip-add-btn" id="moodCustomAddBtn">+</button>
@@ -358,7 +388,7 @@ function renderDaySheetContent(){
 function wireDaySheetBody(){
   const addBtn = document.getElementById('addPainEntryBtn');
   if (addBtn) addBtn.onclick = () => {
-    painDraft = { category: null, intensity: 5, timeOfDay: null };
+    painDraft = { category: null, intensity: 5, timeOfDay: null, note: '' };
     renderDaySheetContent();
   };
 
@@ -378,6 +408,12 @@ function wireDaySheetBody(){
   if (intensityInput) intensityInput.oninput = () => { painDraft.intensity = Number(intensityInput.value); };
   if (intensityInput) intensityInput.onchange = () => { painDraft.intensity = Number(intensityInput.value); renderDaySheetContent(); };
 
+  // Kein Re-Render bei jedem Tastendruck (anders als bei den Chips/dem
+  // Slider) — sonst würde das Textfeld bei jeder Eingabe den Fokus verlieren.
+  // Der Wert wird trotzdem sofort im Entwurf (painDraft) mitgeführt.
+  const noteInput = document.getElementById('painDraftNote');
+  if (noteInput) noteInput.oninput = () => { painDraft.note = noteInput.value; };
+
   const addDraftBtn = document.getElementById('painDraftAddBtn');
   if (addDraftBtn) addDraftBtn.onclick = () => {
     if (!painDraft.category) return;
@@ -395,19 +431,13 @@ function wireDaySheetBody(){
 
   document.querySelectorAll('#symptomChipRow .chip').forEach(chip => {
     chip.onclick = () => {
-      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
-      const id = chip.dataset.symptom;
-      const next = entry.symptoms.includes(id) ? entry.symptoms.filter(s => s !== id) : [...entry.symptoms, id];
-      State.dayLogs = new Map(setDaySymptoms(daySheetISO, next).map(e => [e.date, e]));
+      State.dayLogs = new Map(toggleSymptomEntry(daySheetISO, chip.dataset.symptom).map(e => [e.date, e]));
       renderDaySheetContent();
     };
   });
   document.querySelectorAll('#moodChipRow .chip').forEach(chip => {
     chip.onclick = () => {
-      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
-      const id = chip.dataset.mood;
-      const next = entry.moods.includes(id) ? entry.moods.filter(m => m !== id) : [...entry.moods, id];
-      State.dayLogs = new Map(setDayMoods(daySheetISO, next).map(e => [e.date, e]));
+      State.dayLogs = new Map(toggleMoodEntry(daySheetISO, chip.dataset.mood).map(e => [e.date, e]));
       renderDaySheetContent();
     };
   });
@@ -419,8 +449,7 @@ function wireDaySheetBody(){
     if (!label) return;
     const { customItems, item } = addCustomSymptom(label);
     State.customItems = customItems;
-    const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
-    State.dayLogs = new Map(setDaySymptoms(daySheetISO, [...entry.symptoms, item.id]).map(e => [e.date, e]));
+    State.dayLogs = new Map(toggleSymptomEntry(daySheetISO, item.id).map(e => [e.date, e]));
     renderDaySheetContent();
   };
 
@@ -431,8 +460,7 @@ function wireDaySheetBody(){
     if (!label) return;
     const { customItems, item } = addCustomMood(label);
     State.customItems = customItems;
-    const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
-    State.dayLogs = new Map(setDayMoods(daySheetISO, [...entry.moods, item.id]).map(e => [e.date, e]));
+    State.dayLogs = new Map(toggleMoodEntry(daySheetISO, item.id).map(e => [e.date, e]));
     renderDaySheetContent();
   };
 }

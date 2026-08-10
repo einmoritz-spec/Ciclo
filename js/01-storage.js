@@ -65,6 +65,39 @@ function generateEntryId(prefix){
   return (prefix || 'e') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+/** Aktueller Zeitstempel (ISO 8601, echte Uhrzeit inkl. Sekunden) für die
+    automatische Erfassungszeit jedes Schmerz-/Symptom-/Stimmungs-Eintrags —
+    bewusst der echte "jetzt"-Zeitpunkt (new Date()), nicht State.today (das
+    trägt nur das Datum für die Zyklus-Berechnung, keine Uhrzeit). */
+function nowStamp(){
+  return new Date().toISOString();
+}
+
+/** Bringt eine geladene/migrierte Tages-Log-Liste in die aktuelle, vollständige
+    Form: jeder Schmerz-Eintrag bekommt garantiert `note`/`loggedAt` (fehlen bei
+    älteren, bereits migrierten Installationen), jeder Symptom-/Stimmungs-
+    Eintrag wird von einer reinen ID (Vorversion ohne Zeiterfassung) zu einem
+    { id, loggedAt }-Objekt normalisiert. Macht loadDayLogs() unabhängig davon,
+    aus welcher App-Version die gespeicherten Daten stammen. */
+function normalizeDayLogs(dayLogs){
+  const normalizeTagged = (list) => (list || []).map(item =>
+    typeof item === 'string' ? { id: item, loggedAt: null } : { id: item.id, loggedAt: item.loggedAt ?? null }
+  );
+  return dayLogs.map(entry => ({
+    date: entry.date,
+    pain: (entry.pain || []).map(p => ({
+      id: p.id || generateEntryId('p'),
+      category: p.category ?? null,
+      intensity: p.intensity ?? null,
+      timeOfDay: p.timeOfDay ?? null,
+      note: p.note ?? null,
+      loggedAt: p.loggedAt ?? null
+    })),
+    symptoms: normalizeTagged(entry.symptoms),
+    moods: normalizeTagged(entry.moods)
+  }));
+}
+
 /** Liest NUR den alten Schmerztage-Key (Version vor den Tages-Logs). Wird
     ausschließlich einmalig von loadDayLogs() für die Migration verwendet —
     kein anderer Code darf mehr direkt darauf zugreifen. Deckt beide früheren
@@ -87,19 +120,20 @@ function emptyDayEntry(iso){
 }
 
 /** Lädt alle Tages-Logs (Schmerz-Einträge + Symptome + Stimmungen je Datum,
-    aufsteigend nach Datum sortiert). Beim allerersten Aufruf nach einem Update
-    wird transparent aus dem alten reinen Schmerztage-Format migriert: ein
-    Eintrag ohne Kategorien wird zu einem generischen Schmerz-Eintrag (wie ihn
-    der "Schnell"-Modus weiterhin anlegt), jede vorhandene Kategorie wird ein
-    eigener Schmerz-Eintrag ohne Intensität/Tageszeit (die es im alten Format
-    nicht gab). Das Ergebnis wird sofort im neuen Format gespeichert, sodass
-    die Migration nur einmal läuft. */
+    aufsteigend nach Datum sortiert), immer in der aktuellen Datenform
+    (normalizeDayLogs()). Beim allerersten Aufruf nach einem Update wird
+    transparent aus dem alten reinen Schmerztage-Format migriert: ein Eintrag
+    ohne Kategorien wird zu einem generischen Schmerz-Eintrag (wie ihn der
+    "Schnell"-Modus weiterhin anlegt), jede vorhandene Kategorie wird ein
+    eigener Schmerz-Eintrag ohne Intensität/Tageszeit/Notiz/Erfassungszeit (die
+    es im alten Format nicht gab). Das Ergebnis wird sofort im neuen Format
+    gespeichert, sodass die Migration nur einmal läuft. */
 function loadDayLogs(){
   try {
     const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.DAY_LOGS);
     if (raw){
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? normalizeDayLogs(parsed) : [];
     }
   } catch (err) {
     console.error('[storage] Tages-Logs konnten nicht geladen werden:', err);
@@ -113,8 +147,8 @@ function loadDayLogs(){
   const migrated = legacy.map(old => {
     const categories = Array.isArray(old.categories) ? old.categories : [];
     const pain = categories.length
-      ? categories.map(cat => ({ id: generateEntryId('p'), category: cat, intensity: null, timeOfDay: null }))
-      : [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null }];
+      ? categories.map(cat => ({ id: generateEntryId('p'), category: cat, intensity: null, timeOfDay: null, note: null, loggedAt: null }))
+      : [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null, note: null, loggedAt: null }];
     return { date: old.date, pain, symptoms: [], moods: [] };
   });
   migrated.sort((a, b) => a.date.localeCompare(b.date));
@@ -169,19 +203,31 @@ function upsertDayEntry(iso, mutate){
     Detailgrad "Detailliert" erfassten Symptomen/Stimmungen an diesem Tag, die
     bleiben unangetastet. Sind bereits (egal welche) Schmerz-Einträge vorhanden,
     werden beim Umschalten ALLE entfernt; sonst wird der eine generische Eintrag
-    angelegt. */
+    mit der aktuellen Uhrzeit (loggedAt) angelegt. */
 function togglePainDayQuick(iso){
   return upsertDayEntry(iso, entry => {
     if (entry.pain.length) entry.pain = [];
-    else entry.pain = [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null }];
+    else entry.pain = [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null, note: null, loggedAt: nowStamp() }];
   });
 }
 
 /** Fügt einen einzelnen Schmerz-Eintrag hinzu (Detailgrad "Detailliert", siehe
-    openDayDetailSheet() in 04-calendar.js) — ein Tag kann mehrere davon haben. */
-function addPainEntry(iso, { category, intensity, timeOfDay }){
+    openDayDetailSheet() in 04-calendar.js) — ein Tag kann mehrere davon haben.
+    `note` ist ein freier Text, nur bei category "sonstige" relevant/gefüllt
+    (siehe painSubformHTML() in 04-calendar.js). `loggedAt` wird IMMER
+    automatisch auf den aktuellen Zeitpunkt gesetzt — nicht manuell wählbar —
+    damit sich später nachvollziehen lässt, wann genau ein Eintrag erfasst
+    wurde (unabhängig von der frei gewählten Tageszeit-Angabe timeOfDay). */
+function addPainEntry(iso, { category, intensity, timeOfDay, note }){
   return upsertDayEntry(iso, entry => {
-    entry.pain.push({ id: generateEntryId('p'), category: category || null, intensity: intensity ?? null, timeOfDay: timeOfDay || null });
+    entry.pain.push({
+      id: generateEntryId('p'),
+      category: category || null,
+      intensity: intensity ?? null,
+      timeOfDay: timeOfDay || null,
+      note: note ? note.trim() : null,
+      loggedAt: nowStamp()
+    });
   });
 }
 
@@ -191,14 +237,25 @@ function removePainEntry(iso, entryId){
   });
 }
 
-/** Ersetzt die komplette Symptom-Auswahl eines Tages (Mehrfachauswahl-Chips). */
-function setDaySymptoms(iso, symptomIds){
-  return upsertDayEntry(iso, entry => { entry.symptoms = symptomIds; });
+/** Schaltet ein einzelnes Symptom für einen Tag an/aus (Mehrfachauswahl-
+    Chips). Beim Anschalten wird die aktuelle Uhrzeit als loggedAt vermerkt;
+    beim Ausschalten geht sie mit dem Eintrag verloren (bei erneutem Anschalten
+    wird ein neuer Zeitpunkt gesetzt) — entspricht dem Tap-Verhalten der Chips. */
+function toggleSymptomEntry(iso, symptomId){
+  return upsertDayEntry(iso, entry => {
+    const idx = entry.symptoms.findIndex(s => s.id === symptomId);
+    if (idx !== -1) entry.symptoms.splice(idx, 1);
+    else entry.symptoms.push({ id: symptomId, loggedAt: nowStamp() });
+  });
 }
 
-/** Ersetzt die komplette Stimmungs-Auswahl eines Tages. */
-function setDayMoods(iso, moodIds){
-  return upsertDayEntry(iso, entry => { entry.moods = moodIds; });
+/** Wie toggleSymptomEntry(), nur für Stimmungs-Chips. */
+function toggleMoodEntry(iso, moodId){
+  return upsertDayEntry(iso, entry => {
+    const idx = entry.moods.findIndex(m => m.id === moodId);
+    if (idx !== -1) entry.moods.splice(idx, 1);
+    else entry.moods.push({ id: moodId, loggedAt: nowStamp() });
+  });
 }
 
 /** Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (Detailgrad

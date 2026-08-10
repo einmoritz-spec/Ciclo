@@ -6,7 +6,7 @@
    Zum Testen von Änderungen daher immer ein Inkognito-/privates Fenster
    verwenden, um die Cache-Falle beim normalen Neuladen zu umgehen.
 --------------------------------------------------- */
-const CACHE_NAME = 'ciclo-cache-v11';
+const CACHE_NAME = 'ciclo-cache-v12';
 
 // Relative Pfade (kein führendes "/"), damit es auch unter einem
 // GitHub-Pages-Projektpfad (z.B. /reponame/) funktioniert.
