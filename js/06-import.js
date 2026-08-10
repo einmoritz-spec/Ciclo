@@ -1,3 +1,9 @@
+import { addPeriodEntry, loadPeriods } from './01-storage.js';
+import { State } from './02-state-theme.js';
+import { addDays, daysBetween, formatISODate, parseISODate } from './03-utils.js';
+import { goCalendar, pushView } from './05-navigation.js';
+import { fmtDateReadable } from './08-stats-progress.js';
+
 /* ---------------------------------------------------
    DRIP-CSV-IMPORT
    Eigenständiger Sub-Flow (kein Bottom-Nav-Tab, eigener Zurück-Header wie
@@ -227,7 +233,7 @@ function wireImportView(){
   updateImportSummary();
 }
 
-function renderImportView(){
+export function renderImportView(){
   const app = document.getElementById('app');
   app.innerHTML = `
     <header class="app-header back-header">
@@ -243,4 +249,4 @@ function renderImportView(){
   wireImportView();
 }
 
-function goImport(push){ if (push !== false) pushView('import'); renderImportView(); }
+export function goImport(push){ if (push !== false) pushView('import'); renderImportView(); }

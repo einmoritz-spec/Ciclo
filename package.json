@@ -1,0 +1,17 @@
+{
+  "name": "ciclo",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Periodenkalender — reine, offlinefähige PWA ohne Build-Schritt. Diese package.json wird NUR für Entwickler-Tooling gebraucht (Tests, optionale Typprüfung); die App selbst läuft direkt aus index.html, ganz ohne npm/Bundler.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --checkJs --allowJs --noEmit --target es2022 --module es2022 --moduleResolution bundler js/*.js js/data/*.js"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.4",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.3"
+  }
+}

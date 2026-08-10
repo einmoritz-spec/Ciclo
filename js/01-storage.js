@@ -1,3 +1,6 @@
+import { parseISODate } from './03-utils.js';
+import { APP_DATA } from './data/app-data.js';
+
 /**
  * 01-storage.js
  * -----------------------------------------------------------------------
@@ -7,11 +10,23 @@
  * -----------------------------------------------------------------------
  */
 
+/**
+ * @typedef {import('./types.js').Period} Period
+ * @typedef {import('./types.js').PainEntry} PainEntry
+ * @typedef {import('./types.js').TaggedItem} TaggedItem
+ * @typedef {import('./types.js').DayLog} DayLog
+ * @typedef {import('./types.js').CustomCatalogItem} CustomCatalogItem
+ * @typedef {import('./types.js').CustomItems} CustomItems
+ * @typedef {import('./types.js').ThemeVarSet} ThemeVarSet
+ * @typedef {import('./types.js').AppSettings} AppSettings
+ */
+
 function generatePeriodId() {
   return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
-function loadPeriods() {
+/** @returns {Period[]} */
+export function loadPeriods() {
   try {
     const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.PERIODS);
     if (!raw) return [];
@@ -23,6 +38,7 @@ function loadPeriods() {
   }
 }
 
+/** @param {Period[]} periods */
 function savePeriods(periods) {
   try {
     localStorage.setItem(APP_DATA.STORAGE_KEYS.PERIODS, JSON.stringify(periods));
@@ -33,7 +49,12 @@ function savePeriods(periods) {
   }
 }
 
-function addPeriodEntry(startISO, endISO) {
+/**
+ * @param {string} startISO
+ * @param {string} endISO
+ * @returns {Period} der neu angelegte Eintrag
+ */
+export function addPeriodEntry(startISO, endISO) {
   const periods = loadPeriods();
   const entry = { id: generatePeriodId(), start: startISO, end: endISO };
   periods.push(entry);
@@ -42,7 +63,11 @@ function addPeriodEntry(startISO, endISO) {
   return entry;
 }
 
-function deletePeriodEntry(periodId) {
+/**
+ * @param {string} periodId
+ * @returns {Period[]} verbleibende Perioden nach dem Löschen
+ */
+export function deletePeriodEntry(periodId) {
   const periods = loadPeriods().filter(p => p.id !== periodId);
   savePeriods(periods);
   return periods;
@@ -50,8 +75,11 @@ function deletePeriodEntry(periodId) {
 
 /** Aktualisiert eine bestehende Periode (z.B. neues Enddatum beim nachträglichen
     Verlängern per Klick, siehe findExtendablePeriod()/handleDayClick() in
-    04-calendar.js) statt sie zu löschen und neu anzulegen. */
-function updatePeriodEntry(periodId, updates) {
+    04-calendar.js) statt sie zu löschen und neu anzulegen.
+    @param {string} periodId
+    @param {Partial<Period>} updates
+    @returns {Period[]} */
+export function updatePeriodEntry(periodId, updates) {
   const periods = loadPeriods();
   const idx = periods.findIndex(p => p.id === periodId);
   if (idx === -1) return periods;
@@ -117,8 +145,10 @@ function _loadLegacyPainDays(){
   }
 }
 
-/** Leerer Tages-Log als Ausgangspunkt für getDayEntry()/upsertDayEntry(). */
-function emptyDayEntry(iso){
+/** Leerer Tages-Log als Ausgangspunkt für getDayEntry()/upsertDayEntry().
+    @param {string} iso
+    @returns {DayLog} */
+export function emptyDayEntry(iso){
   return { date: iso, note: null, pain: [], symptoms: [], moods: [] };
 }
 
@@ -130,8 +160,9 @@ function emptyDayEntry(iso){
     "Schnell"-Modus weiterhin anlegt), jede vorhandene Kategorie wird ein
     eigener Schmerz-Eintrag ohne Intensität/Tageszeit/Notiz/Erfassungszeit (die
     es im alten Format nicht gab). Das Ergebnis wird sofort im neuen Format
-    gespeichert, sodass die Migration nur einmal läuft. */
-function loadDayLogs(){
+    gespeichert, sodass die Migration nur einmal läuft.
+    @returns {DayLog[]} */
+export function loadDayLogs(){
   try {
     const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.DAY_LOGS);
     if (raw){
@@ -179,7 +210,10 @@ function findDayEntry(dayLogs, iso){
     entfernt den Eintrag wieder komplett, falls er danach in allen drei
     Bereichen leer ist (kein toter Datensatz für einen Tag ohne Daten), und
     persistiert das Ergebnis. Zentrale Schreib-Funktion für alle Änderungen an
-    Schmerz/Symptomen/Stimmungen. */
+    Schmerz/Symptomen/Stimmungen.
+    @param {string} iso
+    @param {(entry: DayLog) => void} mutate
+    @returns {DayLog[]} */
 function upsertDayEntry(iso, mutate){
   const dayLogs = loadDayLogs();
   let entry = findDayEntry(dayLogs, iso);
@@ -206,8 +240,10 @@ function upsertDayEntry(iso, mutate){
     Detailgrad "Detailliert" erfassten Symptomen/Stimmungen an diesem Tag, die
     bleiben unangetastet. Sind bereits (egal welche) Schmerz-Einträge vorhanden,
     werden beim Umschalten ALLE entfernt; sonst wird der eine generische Eintrag
-    mit der aktuellen Uhrzeit (loggedAt) angelegt. */
-function togglePainDayQuick(iso){
+    mit der aktuellen Uhrzeit (loggedAt) angelegt.
+    @param {string} iso
+    @returns {DayLog[]} */
+export function togglePainDayQuick(iso){
   return upsertDayEntry(iso, entry => {
     if (entry.pain.length) entry.pain = [];
     else entry.pain = [{ id: generateEntryId('p'), category: null, intensity: null, timeOfDay: null, note: null, loggedAt: nowStamp() }];
@@ -217,11 +253,14 @@ function togglePainDayQuick(iso){
 /** Fügt einen einzelnen Schmerz-Eintrag hinzu (Detailgrad "Detailliert", siehe
     openDayDetailSheet() in 04-calendar.js) — ein Tag kann mehrere davon haben.
     `note` ist ein freier Text, nur bei category "sonstige" relevant/gefüllt
-    (siehe painSubformHTML() in 04-calendar.js). `loggedAt` wird IMMER
-    automatisch auf den aktuellen Zeitpunkt gesetzt — nicht manuell wählbar —
-    damit sich später nachvollziehen lässt, wann genau ein Eintrag erfasst
-    wurde (unabhängig von der frei gewählten Tageszeit-Angabe timeOfDay). */
-function addPainEntry(iso, { category, intensity, timeOfDay, note }){
+    (siehe painSubformHTML() in 04-calendar.js). `loggedAt` wird aus `time`
+    ('HH:MM', manuell im Formular wählbar — wichtig für rückwirkend erfasste
+    Einträge an vergangenen Tagen) berechnet; ohne `time` fällt es auf den
+    aktuellen Zeitpunkt zurück.
+    @param {string} iso
+    @param {{category: string|null, intensity: number|null, timeOfDay: import('./types.js').PainTimeOfDay|null, note?: string|null, time?: string}} draft
+    @returns {DayLog[]} */
+export function addPainEntry(iso, { category, intensity, timeOfDay, note, time }){
   return upsertDayEntry(iso, entry => {
     entry.pain.push({
       id: generateEntryId('p'),
@@ -229,12 +268,15 @@ function addPainEntry(iso, { category, intensity, timeOfDay, note }){
       intensity: intensity ?? null,
       timeOfDay: timeOfDay || null,
       note: note ? note.trim() : null,
-      loggedAt: nowStamp()
+      loggedAt: time ? stampFromDateAndTime(iso, time) : nowStamp()
     });
   });
 }
 
-function removePainEntry(iso, entryId){
+/** @param {string} iso
+    @param {string} entryId
+    @returns {DayLog[]} */
+export function removePainEntry(iso, entryId){
   return upsertDayEntry(iso, entry => {
     entry.pain = entry.pain.filter(p => p.id !== entryId);
   });
@@ -243,8 +285,11 @@ function removePainEntry(iso, entryId){
 /** Schaltet ein einzelnes Symptom für einen Tag an/aus (Mehrfachauswahl-
     Chips). Beim Anschalten wird die aktuelle Uhrzeit als loggedAt vermerkt;
     beim Ausschalten geht sie mit dem Eintrag verloren (bei erneutem Anschalten
-    wird ein neuer Zeitpunkt gesetzt) — entspricht dem Tap-Verhalten der Chips. */
-function toggleSymptomEntry(iso, symptomId){
+    wird ein neuer Zeitpunkt gesetzt) — entspricht dem Tap-Verhalten der Chips.
+    @param {string} iso
+    @param {string} symptomId
+    @returns {DayLog[]} */
+export function toggleSymptomEntry(iso, symptomId){
   return upsertDayEntry(iso, entry => {
     const idx = entry.symptoms.findIndex(s => s.id === symptomId);
     if (idx !== -1) entry.symptoms.splice(idx, 1);
@@ -252,8 +297,11 @@ function toggleSymptomEntry(iso, symptomId){
   });
 }
 
-/** Wie toggleSymptomEntry(), nur für Stimmungs-Chips. */
-function toggleMoodEntry(iso, moodId){
+/** Wie toggleSymptomEntry(), nur für Stimmungs-Chips.
+    @param {string} iso
+    @param {string} moodId
+    @returns {DayLog[]} */
+export function toggleMoodEntry(iso, moodId){
   return upsertDayEntry(iso, entry => {
     const idx = entry.moods.findIndex(m => m.id === moodId);
     if (idx !== -1) entry.moods.splice(idx, 1);
@@ -262,10 +310,10 @@ function toggleMoodEntry(iso, moodId){
 }
 
 /** Baut einen ISO-Zeitstempel aus einem Kalendertag (iso) + einer manuell
-    gewählten Uhrzeit (hhmm, 'HH:MM') — für die nachträgliche Korrektur der
-    automatisch erfassten Uhrzeit (langer Druck auf einen Schmerz-Eintrag/
-    Symptom-/Stimmungs-Chip, siehe openTimeEditor() in 04-calendar.js). Nutzt
-    denselben Kalendertag wie der Eintrag, nur die Uhrzeit wird übernommen. */
+    gewählten Uhrzeit (hhmm, 'HH:MM') — für rückwirkend erfasste/korrigierte
+    Einträge (siehe addPainEntry()/updatePainEntry() oben und
+    updateSymptomTime()/updateMoodTime() unten). Nutzt denselben Kalendertag
+    wie der Eintrag, nur die Uhrzeit wird übernommen. */
 function stampFromDateAndTime(iso, hhmm){
   const [h, m] = (hhmm || '00:00').split(':').map(Number);
   const d = parseISODate(iso);
@@ -273,18 +321,36 @@ function stampFromDateAndTime(iso, hhmm){
   return d.toISOString();
 }
 
-/** Überschreibt die automatisch erfasste Uhrzeit (loggedAt) eines bestehenden
-    Schmerz-Eintrags manuell — z.B. wenn der Schmerz schon früher aufgetreten
-    ist, als er eingetragen wurde. */
-function updatePainEntryTime(iso, entryId, hhmm){
+/** Überschreibt einen bestehenden Schmerz-Eintrag VOLLSTÄNDIG (Kategorie,
+    Intensität, Tageszeit, Notiz UND die erfasste Uhrzeit) — die Bearbeiten-
+    Ansicht für einen bereits angelegten Eintrag (langer Druck darauf, siehe
+    openDayDetailSheet() in 04-calendar.js), im Unterschied zu addPainEntry()
+    für einen komplett neuen Eintrag. `time` ('HH:MM') ist optional; ohne
+    Angabe bleibt die bisherige Uhrzeit unverändert.
+    @param {string} iso
+    @param {string} entryId
+    @param {{category: string|null, intensity: number|null, timeOfDay: import('./types.js').PainTimeOfDay|null, note?: string|null, time?: string}} updates
+    @returns {DayLog[]} */
+export function updatePainEntry(iso, entryId, { category, intensity, timeOfDay, note, time }){
   return upsertDayEntry(iso, entry => {
     const item = entry.pain.find(p => p.id === entryId);
-    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
+    if (!item) return;
+    item.category = category || null;
+    item.intensity = intensity ?? null;
+    item.timeOfDay = timeOfDay || null;
+    item.note = note ? note.trim() : null;
+    if (time) item.loggedAt = stampFromDateAndTime(iso, time);
   });
 }
 
-/** Wie updatePainEntryTime(), für ein bereits ausgewähltes Symptom. */
-function updateSymptomTime(iso, symptomId, hhmm){
+/** Wie updatePainEntry(), aber nur für die Uhrzeit eines bereits
+    ausgewählten Symptoms (Symptome haben sonst keine weiteren Felder zum
+    Bearbeiten — nur an/aus + Zeitpunkt).
+    @param {string} iso
+    @param {string} symptomId
+    @param {string} hhmm
+    @returns {DayLog[]} */
+export function updateSymptomTime(iso, symptomId, hhmm){
   return upsertDayEntry(iso, entry => {
     const item = entry.symptoms.find(s => s.id === symptomId);
     if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
@@ -294,13 +360,17 @@ function updateSymptomTime(iso, symptomId, hhmm){
 /** Setzt/löscht die freie Tages-Notiz (unabhängig von der Schmerz-Notiz bei
     Kategorie "Sonstige") — z.B. für "war krank", "Geburtstag gefeiert" o.ä.
     Leerer/nur-Leerzeichen-Text entfernt die Notiz wieder (null). */
-function setDayNote(iso, text){
+export function setDayNote(iso, text){
   const trimmed = (text || '').trim();
   return upsertDayEntry(iso, entry => { entry.note = trimmed || null; });
 }
 
-/** Wie updatePainEntryTime(), für eine bereits ausgewählte Stimmung. */
-function updateMoodTime(iso, moodId, hhmm){
+/** Wie updateSymptomTime(), für eine bereits ausgewählte Stimmung.
+    @param {string} iso
+    @param {string} moodId
+    @param {string} hhmm
+    @returns {DayLog[]} */
+export function updateMoodTime(iso, moodId, hhmm){
   return upsertDayEntry(iso, entry => {
     const item = entry.moods.find(m => m.id === moodId);
     if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
@@ -309,8 +379,9 @@ function updateMoodTime(iso, moodId, hhmm){
 
 /** Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (Detailgrad
     "Detailliert" -> "+ Eigenes"), ergänzen die feste Liste aus
-    APP_DATA.SYMPTOM_CATEGORIES / APP_DATA.MOOD_CATEGORIES dauerhaft. */
-function loadCustomItems(){
+    APP_DATA.SYMPTOM_CATEGORIES / APP_DATA.MOOD_CATEGORIES dauerhaft.
+    @returns {CustomItems} */
+export function loadCustomItems(){
   try {
     const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.CUSTOM_ITEMS);
     const parsed = raw ? JSON.parse(raw) : {};
@@ -324,6 +395,7 @@ function loadCustomItems(){
   }
 }
 
+/** @param {CustomItems} customItems */
 function saveCustomItems(customItems){
   try {
     localStorage.setItem(APP_DATA.STORAGE_KEYS.CUSTOM_ITEMS, JSON.stringify(customItems));
@@ -334,7 +406,9 @@ function saveCustomItems(customItems){
   }
 }
 
-function addCustomSymptom(label){
+/** @param {string} label
+    @returns {{customItems: CustomItems, item: CustomCatalogItem}} */
+export function addCustomSymptom(label){
   const customItems = loadCustomItems();
   const item = { id: generateEntryId('cs'), label: label.trim() };
   customItems.symptoms.push(item);
@@ -342,7 +416,9 @@ function addCustomSymptom(label){
   return { customItems, item };
 }
 
-function addCustomMood(label){
+/** @param {string} label
+    @returns {{customItems: CustomItems, item: CustomCatalogItem}} */
+export function addCustomMood(label){
   const customItems = loadCustomItems();
   const item = { id: generateEntryId('cm'), label: label.trim() };
   customItems.moods.push(item);
@@ -355,8 +431,12 @@ function addCustomMood(label){
     aus dem Katalog aufgelöst wird (symptomCatalog()/moodCatalog(), 02-state-
     theme.js), reicht eine Änderung hier — bereits erfasste Tage zeigen danach
     automatisch das neue Label, ohne dass irgendwelche Tages-Logs angefasst
-    werden müssen. field: 'symptoms' | 'moods'. */
-function renameCustomItem(field, id, newLabel){
+    werden müssen.
+    @param {'symptoms'|'moods'} field
+    @param {string} id
+    @param {string} newLabel
+    @returns {CustomItems} */
+export function renameCustomItem(field, id, newLabel){
   const customItems = loadCustomItems();
   const item = customItems[field].find(i => i.id === id);
   if (item) item.label = newLabel.trim();
@@ -371,13 +451,17 @@ function renameCustomItem(field, id, newLabel){
     (löscht die Vergangenheit dieses Chips mit, statt sie nur unsichtbar zu
     machen — bewusste Entscheidung, da ein gelöschter eigener Chip i.d.R. ein
     Tippfehler oder Fehlversuch war und nicht rückwirkend Sinn ergibt). */
-function deleteCustomItem(field, id){
+export function deleteCustomItem(field, id){
   const customItems = loadCustomItems();
   customItems[field] = customItems[field].filter(i => i.id !== id);
   saveCustomItems(customItems);
 
-  const dayLogs = loadDayLogs();
-  dayLogs.forEach(entry => { entry[field] = entry[field].filter(i => i.id !== id); });
+  const dayLogs = loadDayLogs()
+    .map(entry => ({ ...entry, [field]: entry[field].filter(i => i.id !== id) }))
+    // Dieselbe Leer-Regel wie in upsertDayEntry(): ein Tag ohne jegliche Daten
+    // wird nicht als toter Datensatz behalten, nur weil hier direkt am Array
+    // statt über upsertDayEntry() gearbeitet wird.
+    .filter(entry => entry.note || entry.pain.length || entry.symptoms.length || entry.moods.length);
   saveDayLogs(dayLogs);
 
   return { customItems, dayLogs };
@@ -393,7 +477,7 @@ function loadThemeOverrides() {
   }
 }
 
-function saveThemeOverrides(overrides) {
+export function saveThemeOverrides(overrides) {
   try {
     localStorage.setItem(APP_DATA.STORAGE_KEYS.THEME, JSON.stringify(overrides));
     return true;
@@ -403,7 +487,10 @@ function saveThemeOverrides(overrides) {
   }
 }
 
-function loadSettings(){
+/** @returns {Partial<AppSettings>} kann unvollständig sein (z.B. bei
+    Erstinstallation) — initApp() (10-app-init.js) ergänzt fehlende Felder
+    mit Defaults. */
+export function loadSettings(){
   try {
     const raw = localStorage.getItem(APP_DATA.STORAGE_KEYS.SETTINGS);
     return raw ? JSON.parse(raw) : {};
@@ -413,7 +500,8 @@ function loadSettings(){
   }
 }
 
-function saveSettings(settings){
+/** @param {Partial<AppSettings>} settings */
+export function saveSettings(settings){
   try {
     localStorage.setItem(APP_DATA.STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
     return true;
@@ -424,10 +512,12 @@ function saveSettings(settings){
 }
 
 /**
- * Backup-Export als JSON-Objekt (Basis für 11-export-report.js, sobald es existiert).
- * Wichtig, da es kein Backend gibt und ein Cache-Reset sonst Datenverlust bedeutet.
+ * Backup-Export als JSON-Objekt (Basis für den "Daten exportieren"-Button,
+ * 09-settings.js). Wichtig, da es kein Backend gibt und ein Cache-Reset
+ * sonst Datenverlust bedeutet.
+ * @returns {{exportedAt: string, version: string, periods: Period[], theme: ThemeVarSet|null, settings: Partial<AppSettings>, dayLogs: DayLog[], customItems: CustomItems}}
  */
-function exportAllData() {
+export function exportAllData() {
   return {
     exportedAt: new Date().toISOString(),
     version: APP_DATA.APP_VERSION,
@@ -442,7 +532,7 @@ function exportAllData() {
 /** Importiert ein Backup. Unterstützt sowohl das aktuelle Format (dayLogs)
     als auch ältere Backups (painDays) — letztere werden über dieselbe
     Migrations-Logik wie loadDayLogs() in das aktuelle Format überführt. */
-function importAllData(data) {
+export function importAllData(data) {
   if (!data || !Array.isArray(data.periods)) {
     throw new Error('Ungültiges Backup-Format.');
   }
@@ -466,4 +556,33 @@ function importAllData(data) {
     moods: Array.isArray(data.customItems.moods) ? data.customItems.moods : []
   });
   return true;
+}
+
+/** Setzt einen Marker UNMITTELBAR VOR einem Hard-Update (runHardUpdate(),
+    11-update.js) — direkt bevor Service Worker + Caches gelöscht und die App
+    per location.reload() neu geladen wird. Nach dem Reload liest
+    consumeHardUpdatePending() diesen Marker, um zu wissen, dass gerade ein
+    Hard-Update stattgefunden hat (Basis für den "Aktualisiert"-Hinweis-
+    Banner, showPostHardUpdateBanner() in 11-update.js). */
+export function setHardUpdatePending(){
+  try {
+    localStorage.setItem(APP_DATA.STORAGE_KEYS.HARD_UPDATE_PENDING, '1');
+  } catch (err) {
+    console.error('[storage] Hard-Update-Marker konnte nicht gesetzt werden:', err);
+  }
+}
+
+/** Liest den Marker aus setHardUpdatePending() UND entfernt ihn sofort wieder
+    ("konsumiert" ihn) — der Banner darf nur EINMAL direkt nach dem
+    Hard-Update erscheinen, nicht bei jedem weiteren Laden danach.
+    @returns {boolean} */
+export function consumeHardUpdatePending(){
+  try {
+    const wasPending = localStorage.getItem(APP_DATA.STORAGE_KEYS.HARD_UPDATE_PENDING) === '1';
+    if (wasPending) localStorage.removeItem(APP_DATA.STORAGE_KEYS.HARD_UPDATE_PENDING);
+    return wasPending;
+  } catch (err) {
+    console.error('[storage] Hard-Update-Marker konnte nicht gelesen werden:', err);
+    return false;
+  }
 }

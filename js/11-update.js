@@ -1,3 +1,8 @@
+import { consumeHardUpdatePending, exportAllData, setHardUpdatePending } from './01-storage.js';
+import { State } from './02-state-theme.js';
+import { formatISODate } from './03-utils.js';
+import { downloadJSON, goSettings } from './09-settings.js';
+
 /* ---------------------------------------------------
    PWA-UPDATE-MECHANISMUS
    Erkennt eine neue Service-Worker-Version und zeigt ein Banner "Neue
@@ -25,14 +30,40 @@
    davor bereits gelaufenen initApp().
 --------------------------------------------------- */
 
-/** Liest alle same-origin <script src>/<link rel=stylesheet href>-Pfade
-    direkt aus dem DOM statt eine zweite Kopie der APP_SHELL-Liste aus sw.js
-    zu pflegen -- bleibt dadurch automatisch aktuell, wenn Dateien dazukommen
-    oder wegfallen. Cross-Origin-Ressourcen (z.B. externe Web-Fonts) bewusst
+/** Cross-Origin-Ressourcen (z.B. externe Web-Fonts) werden bewusst
     ausgeschlossen: ändern sich nicht und würden ohne CORS nur Fehler
-    produzieren. */
+    produzieren. Anders als vor der Umstellung auf ES-Module lässt sich die
+    JS-Dateiliste NICHT mehr vollständig per DOM-Scan ermitteln (siehe
+    JS_MODULE_FILES unten). */
+// Alle über den ES-Modul-Graphen geladenen JS-Dateien — seit der Umstellung
+// auf ein einziges <script type="module"> (js/10-app-init.js, siehe
+// index.html) sind die anderen JS-Dateien NICHT mehr als eigene <script>-Tags
+// im DOM auffindbar, sondern nur noch als import-Ziele. Diese Liste muss
+// deshalb von Hand mit APP_SHELL in sw.js synchron gehalten werden (gleiche
+// Sorgfaltspflicht wie beim CACHE_NAME-Hochzählen dort).
+const JS_MODULE_FILES = [
+  './js/data/app-data.js',
+  './js/types.js',
+  './js/01-storage.js',
+  './js/02-state-theme.js',
+  './js/03-utils.js',
+  './js/04-calendar.js',
+  './js/05-navigation.js',
+  './js/06-import.js',
+  './js/07-chart.js',
+  './js/08-stats-progress.js',
+  './js/09-settings.js',
+  './js/10-app-init.js',
+  './js/11-update.js'
+];
+
+/** Liste aller App-Shell-URLs, die beim Hard-Update am HTTP-Cache vorbei neu
+    angefragt werden (siehe runHardUpdate() unten). Kombiniert die per DOM
+    auffindbaren Ressourcen (index.html-Grunddokument, Stylesheet, das eine
+    Modul-<script>-Tag) mit der oben von Hand gepflegten JS_MODULE_FILES-Liste
+    für die restlichen, nur per import geladenen Module. */
 function appShellUrlsFromDocument(){
-  const urls = ['./', 'index.html', 'manifest.json'];
+  const urls = ['./', 'index.html', 'manifest.json', ...JS_MODULE_FILES];
   document.querySelectorAll('script[src]').forEach(el => {
     const src = el.getAttribute('src');
     if (src && !/^https?:/i.test(src)) urls.push(src);

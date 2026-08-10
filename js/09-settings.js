@@ -1,3 +1,12 @@
+import { deleteCustomItem, exportAllData, importAllData, loadCustomItems, loadDayLogs, loadPeriods, loadSettings, renameCustomItem, saveSettings } from './01-storage.js';
+import { State, applyColorScheme, applyThemePreset, hideItem, isItemHidden, moodCatalog, showItem, symptomCatalog } from './02-state-theme.js';
+import { addDays, average, computeChartData, computeItemFrequency, computePainStats, computePhaseOccurrenceStats, daysBetween, escapeAttr, formatISODate, generateEarthyTheme, parseISODate, topItemsFromCounts } from './03-utils.js';
+import { pushView } from './05-navigation.js';
+import { goImport } from './06-import.js';
+import { barChartSVG, categoryBarChartSVG, fmtDateShort, fmtDaysAvg } from './07-chart.js';
+import { fmtDateReadable } from './08-stats-progress.js';
+import { APP_DATA } from './data/app-data.js';
+
 /* ---------------------------------------------------
    EINSTELLUNGEN
    Eigener Sub-Flow wie 06-import.js (kein Bottom-Nav-Tab, eigener Zurück-
@@ -259,7 +268,7 @@ function settingsContentHTML(){
   `;
 }
 
-function downloadJSON(data, filename){
+export function downloadJSON(data, filename){
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -526,7 +535,7 @@ function wireSettingsView(){
   });
 }
 
-function renderSettingsView(){
+export function renderSettingsView(){
   const app = document.getElementById('app');
   app.innerHTML = `
     <header class="app-header back-header">
@@ -542,4 +551,4 @@ function renderSettingsView(){
   wireSettingsView();
 }
 
-function goSettings(push){ if (push !== false) pushView('settings'); renderSettingsView(); }
+export function goSettings(push){ if (push !== false) pushView('settings'); renderSettingsView(); }

@@ -7,7 +7,7 @@
  * -----------------------------------------------------------------------
  */
 
-const APP_DATA = {
+export const APP_DATA = {
   APP_NAME: 'Ciclo',
   APP_VERSION: '0.2.0',
 
@@ -28,7 +28,11 @@ const APP_DATA = {
     DAY_LOGS: 'tracker_day_logs_v1',
     // Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (siehe
     // addCustomSymptom()/addCustomMood() in 01-storage.js).
-    CUSTOM_ITEMS: 'tracker_custom_items_v1'
+    CUSTOM_ITEMS: 'tracker_custom_items_v1',
+    // Einmaliger Marker: gesetzt direkt vor einem Hard-Update (runHardUpdate(),
+    // 11-update.js), gelesen+gelöscht beim nächsten Laden (consumeHardUpdatePending()
+    // in 01-storage.js) — Basis für den "Aktualisiert"-Hinweis-Banner danach.
+    HARD_UPDATE_PENDING: 'tracker_hard_update_pending_v1'
   },
 
   // Zyklus-Defaults für die spätere Vorhersage-Engine (03-utils.js)

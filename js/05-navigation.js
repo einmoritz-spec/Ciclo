@@ -1,3 +1,10 @@
+import { renderCalendarView, scrollToCurrentMonth } from './04-calendar.js';
+import { renderImportView } from './06-import.js';
+import { renderChartView } from './07-chart.js';
+import { renderStatsView } from './08-stats-progress.js';
+import { renderSettingsView } from './09-settings.js';
+import { APP_DATA } from './data/app-data.js';
+
 /* ---------------------------------------------------
    NAVIGATION (Bottom-Nav + Android-/Browser-Zurück-Taste)
    Gleiches Grundmuster wie in der Trainings-App: history.pushState pro
@@ -6,16 +13,16 @@
    App heraus navigiert.
 --------------------------------------------------- */
 
-function pushView(view){
+export function pushView(view){
   history.pushState({ view }, '', '');
 }
-function replaceView(view){
+export function replaceView(view){
   history.replaceState({ view }, '', '');
 }
 
 // Nur Icons, kein Text-Label mehr unter den Icons (siehe Redesign-Vorlage) —
 // das Label bleibt trotzdem als aria-label für Screenreader erhalten.
-function bottomNavHTML(active){
+export function bottomNavHTML(active){
   const tab = (id, label, icon) => `
     <button type="button" class="nav-tab${active === id ? ' is-active' : ''}" data-tab="${id}" aria-label="${label}">
       <span class="nav-tab-icon">${icon}</span>
@@ -30,7 +37,7 @@ function bottomNavHTML(active){
   `;
 }
 
-function wireBottomNav(){
+export function wireBottomNav(){
   document.querySelectorAll('.bottom-nav .nav-tab').forEach(btn => {
     btn.onclick = () => {
       const tab = btn.dataset.tab;
@@ -52,7 +59,7 @@ function wireBottomNav(){
     (goCalendarHome(), siehe unten). Die zurückliegenden .app-title-Texte in
     den Zurück-Headern (06-import.js/09-settings.js: "Drip-Import"/
     "Einstellungen") sind Seitentitel, kein Marken-Logo, und bleiben Text. */
-function appLogoButtonHTML(id){
+export function appLogoButtonHTML(id){
   return `<button type="button" class="app-logo-btn" id="${id}" aria-label="${APP_DATA.APP_NAME}"><img class="app-logo-img" src="icons/logo-bee.png" alt="${APP_DATA.APP_NAME}"></button>`;
 }
 
@@ -60,7 +67,7 @@ function appLogoButtonHTML(id){
    aktuellen Monat zurueckscrollen (kein unnoetiger Re-Render/History-Eintrag),
    von Chart/Stats aus normal zum Kalender wechseln (der scrollt beim Rendern
    ohnehin automatisch zum aktuellen Monat, siehe renderCalendarView()). */
-function goCalendarHome(){
+export function goCalendarHome(){
   if (document.getElementById('calendarScroll')){
     scrollToCurrentMonth();
   } else {
@@ -68,11 +75,11 @@ function goCalendarHome(){
   }
 }
 
-function goCalendar(push){ if (push !== false) pushView('calendar'); renderCalendarView(); }
+export function goCalendar(push){ if (push !== false) pushView('calendar'); renderCalendarView(); }
 function goChart(push){ if (push !== false) pushView('chart'); renderChartView(); }
 function goStats(push){ if (push !== false) pushView('stats'); renderStatsView(); }
 
-function renderViewByState(state){
+export function renderViewByState(state){
   switch (state.view){
     case 'chart': renderChartView(); break;
     case 'stats': renderStatsView(); break;

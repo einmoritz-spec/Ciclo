@@ -1,3 +1,14 @@
+import { saveSettings, saveThemeOverrides } from './01-storage.js';
+import { generateEarthyTheme } from './03-utils.js';
+import { APP_DATA } from './data/app-data.js';
+
+/**
+ * @typedef {import('./types.js').Period} Period
+ * @typedef {import('./types.js').DayLog} DayLog
+ * @typedef {import('./types.js').CustomItems} CustomItems
+ * @typedef {import('./types.js').AppSettings} AppSettings
+ */
+
 /**
  * 02-state-theme.js
  * -----------------------------------------------------------------------
@@ -7,7 +18,18 @@
  * -----------------------------------------------------------------------
  */
 
-const State = {
+/**
+ * @type {{
+ *   periods: Period[],
+ *   currentView: 'calendar'|'chart'|'stats',
+ *   calendar: { earliestLoaded: {year: number, month: number}|null, latestLoaded: {year: number, month: number}|null, selection: {start: string|null} },
+ *   today: Date,
+ *   settings: AppSettings,
+ *   dayLogs: Map<string, DayLog>,
+ *   customItems: CustomItems
+ * }}
+ */
+export const State = {
   // Geladene Perioden-Einträge: [{ id, start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' }]
   periods: [],
 
@@ -53,10 +75,10 @@ const State = {
 /** Volle Symptom-/Stimmungs-Liste (feste Katalog-Einträge + eigene, per
     "+ Eigenes" ergänzte Chips) — einzige Quelle für Sheet-Anzeige UND
     Label-Auflösung in den Statistiken (08-stats-progress.js/07-chart.js). */
-function symptomCatalog(){
+export function symptomCatalog(){
   return APP_DATA.SYMPTOM_CATEGORIES.concat(State.customItems.symptoms || []);
 }
-function moodCatalog(){
+export function moodCatalog(){
   return APP_DATA.MOOD_CATEGORIES.concat(State.customItems.moods || []);
 }
 
@@ -70,7 +92,7 @@ function moodCatalog(){
  * würde applyThemeVars() als Inline-Style weiterhin die Werte des vorherigen
  * Modus überschreiben.
  */
-function applyColorScheme(mode){
+export function applyColorScheme(mode){
   const resolved = mode === 'system'
     ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : mode;
@@ -132,7 +154,7 @@ function reapplyThemePresetVars(){
 
 /** Wechselt das Farbthema (Sand/Wald/Ton/Stein, siehe APP_DATA.THEME_PRESETS)
     und persistiert die Wahl in State.settings (09-settings.js). */
-function applyThemePreset(presetId){
+export function applyThemePreset(presetId){
   State.settings.themePreset = presetId;
   saveSettings(State.settings);
   reapplyThemePresetVars();
@@ -147,18 +169,18 @@ function applyThemePreset(presetId){
    APP_DATA.VISIBILITY_GROUPS. Persistiert als Teil von State.settings, also
    über dieselbe loadSettings()/saveSettings()-Ablage wie das Farbschema.
 --------------------------------------------------- */
-function isItemHidden(id){
+export function isItemHidden(id){
   return (State.settings.hiddenItems || []).includes(id);
 }
 
-function hideItem(id){
+export function hideItem(id){
   const hidden = new Set(State.settings.hiddenItems || []);
   hidden.add(id);
   State.settings.hiddenItems = Array.from(hidden);
   saveSettings(State.settings);
 }
 
-function showItem(id){
+export function showItem(id){
   const hidden = new Set(State.settings.hiddenItems || []);
   hidden.delete(id);
   State.settings.hiddenItems = Array.from(hidden);
@@ -172,7 +194,7 @@ function showItem(id){
     Events statt separater Touch-/Maus-Handler, deckt beides ab. Unterdrückt den
     direkt folgenden Klick, damit kein onClick auf demselben Element danach
     zusätzlich feuert. */
-function attachLongPress(el, onLongPress, duration){
+export function attachLongPress(el, onLongPress, duration){
   let timer = null;
   let startX = 0, startY = 0;
   let triggered = false;
@@ -215,7 +237,7 @@ function flatVisibilityItems(){
     unten) — erst ein zusätzlicher Tap auf den Button blendet die Karte aus und
     ruft rerenderFn() auf. Ohne Bestätigung (Timeout/ignoriert) bleibt die Karte
     unverändert sichtbar, damit ein versehentlicher langer Druck nichts auslöst. */
-function wireVisibilityLongPress(root, rerenderFn){
+export function wireVisibilityLongPress(root, rerenderFn){
   root.querySelectorAll('[data-vis-id]').forEach(el => {
     attachLongPress(el, () => {
       const id = el.dataset.visId;

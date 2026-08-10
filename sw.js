@@ -6,16 +6,21 @@
    Zum Testen von Änderungen daher immer ein Inkognito-/privates Fenster
    verwenden, um die Cache-Falle beim normalen Neuladen zu umgehen.
 --------------------------------------------------- */
-const CACHE_NAME = 'ciclo-cache-v17';
+const CACHE_NAME = 'ciclo-cache-v19';
 
 // Relative Pfade (kein führendes "/"), damit es auch unter einem
-// GitHub-Pages-Projektpfad (z.B. /reponame/) funktioniert.
+// GitHub-Pages-Projektpfad (z.B. /reponame/) funktioniert. index.html lädt
+// nur noch EIN <script type="module"> (js/10-app-init.js) — die übrigen
+// JS-Dateien werden über dessen import-Kette nachgeladen, müssen aber trotzdem
+// hier einzeln gelistet sein, damit der Service Worker jede als eigene
+// Ressource cachen kann (der Browser fordert jede importierte Datei separat an).
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
   './css/styles.css',
   './js/data/app-data.js',
+  './js/types.js',
   './js/01-storage.js',
   './js/02-state-theme.js',
   './js/03-utils.js',
@@ -26,6 +31,7 @@ const APP_SHELL = [
   './js/08-stats-progress.js',
   './js/09-settings.js',
   './js/10-app-init.js',
+  './js/11-update.js',
   './icons/icon192.png',
   './icons/icon512.png',
   './icons/appletouchicon.png',

@@ -21,23 +21,17 @@
 <div id="app"></div>
 
 <!--
-  Klassische <script>-Tags ohne "defer"/"type=module": alle Dateien teilen
-  sich einen globalen Scope, spätere Dateien greifen direkt auf Funktionen/
-  Variablen früherer Dateien zu. Die Ladereihenfolge ist deshalb verbindlich
-  und entspricht durchgängig der Nummerierung 01–10 (js/data/app-data.js läuft
-  bewusst unnummeriert davor, da es reine Konstanten ohne Logik enthält).
+  Ein einziges <script type="module">: alle anderen JS-Dateien werden über
+  die import-Kette in js/10-app-init.js (und den von dort importierten
+  Dateien) automatisch nachgeladen. Die Ladereihenfolge ergibt sich dadurch
+  aus dem Abhängigkeitsgraphen der ES-Module (jede Datei läuft erst, NACHDEM
+  alle ihre eigenen Imports fertig ausgewertet sind) statt aus der Reihen-
+  folge von <script>-Tags — die frühere Nummerierung 01-storage.js …
+  11-update.js ist rein organisatorisch, keine Lade-Reihenfolge-Vorschrift
+  mehr. Kein Bundler nötig: Browser lösen ES-Module nativ auf, die App bleibt
+  eine einfache Sammlung statischer Dateien ohne Build-Schritt.
 -->
-<script src="js/data/app-data.js"></script>
-<script src="js/01-storage.js"></script>
-<script src="js/02-state-theme.js"></script>
-<script src="js/03-utils.js"></script>
-<script src="js/04-calendar.js"></script>
-<script src="js/05-navigation.js"></script>
-<script src="js/06-import.js"></script>
-<script src="js/07-chart.js"></script>
-<script src="js/08-stats-progress.js"></script>
-<script src="js/09-settings.js"></script>
-<script src="js/10-app-init.js"></script>
+<script type="module" src="js/10-app-init.js"></script>
 
 <script>
 if ('serviceWorker' in navigator) {

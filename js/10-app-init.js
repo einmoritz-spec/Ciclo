@@ -1,10 +1,24 @@
+import { loadCustomItems, loadDayLogs, loadPeriods, loadSettings } from './01-storage.js';
+import { State, applyColorScheme } from './02-state-theme.js';
+import { renderCalendarView } from './04-calendar.js';
+import { renderViewByState, replaceView } from './05-navigation.js';
+import { APP_DATA } from './data/app-data.js';
+// Reiner Seiteneffekt-Import: registriert den PWA-Update-Mechanismus
+// (initUpdateMechanism(), 11-update.js). index.html lädt nur noch DIESE Datei
+// als <script type="module">; jede andere JS-Datei wird automatisch über die
+// import-Kette hier und in den importierten Dateien mitgeladen — die
+// Ladereihenfolge ergibt sich dadurch aus dem Abhängigkeitsgraphen (jedes
+// Modul läuft erst, NACHDEM alle seine Imports fertig ausgewertet sind),
+// nicht mehr aus der Reihenfolge von <script>-Tags.
+import './11-update.js';
+
 /* ---------------------------------------------------
    APP-INIT
-   Letztes Skript im Ladeauftrag (ohne defer, daher ist die Reihenfolge der
-   <script>-Tags in index.html verbindlich). DOM ist zu diesem Zeitpunkt
-   bereits geparst, da die Tags am Ende von <body> stehen.
+   Einstiegspunkt der App (einziges <script type="module"> in index.html).
+   DOM ist zu diesem Zeitpunkt bereits geparst, da Modul-Skripte wie deferred
+   Skripte erst nach dem HTML-Parsing ausgeführt werden.
 --------------------------------------------------- */
-function initApp(){
+export function initApp(){
   State.periods = loadPeriods();
   State.dayLogs = new Map(loadDayLogs().map(e => [e.date, e]));
   State.customItems = loadCustomItems();

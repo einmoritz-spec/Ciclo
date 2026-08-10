@@ -1,16 +1,28 @@
+import { APP_DATA } from './data/app-data.js';
+
+/**
+ * @typedef {import('./types.js').Period} Period
+ * @typedef {import('./types.js').DayLog} DayLog
+ * @typedef {import('./types.js').CycleStats} CycleStats
+ */
+
 /* ---------------------------------------------------
    Utils (Datum)
    Reine Helferfunktionen, kein State, kein DOM-Rendering.
 --------------------------------------------------- */
 function pad2(n){ return n < 10 ? '0' + n : String(n); }
 
-/** Date -> 'YYYY-MM-DD' (lokale Zeit, keine UTC-Verschiebung) */
-function formatISODate(date){
+/** Date -> 'YYYY-MM-DD' (lokale Zeit, keine UTC-Verschiebung)
+    @param {Date} date
+    @returns {string} */
+export function formatISODate(date){
   return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
 }
 
-/** 'YYYY-MM-DD' -> Date (lokale Zeit, 00:00 Uhr) */
-function parseISODate(iso){
+/** 'YYYY-MM-DD' -> Date (lokale Zeit, 00:00 Uhr)
+    @param {string} iso
+    @returns {Date} */
+export function parseISODate(iso){
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d);
 }
@@ -18,16 +30,19 @@ function parseISODate(iso){
 function isSameDay(a, b){
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
-function isToday(date){ return isSameDay(date, new Date()); }
+/** @param {Date} date @returns {boolean} */
+export function isToday(date){ return isSameDay(date, new Date()); }
 
-function addDays(date, n){
+/** @param {Date} date @param {number} n @returns {Date} */
+export function addDays(date, n){
   const d = new Date(date);
   d.setDate(d.getDate() + n);
   return d;
 }
 
-/** Ganzzahlige Differenz in Tagen (b - a), unabhängig von Uhrzeit/Zeitumstellung */
-function daysBetween(a, b){
+/** Ganzzahlige Differenz in Tagen (b - a), unabhängig von Uhrzeit/Zeitumstellung
+    @param {Date} a @param {Date} b @returns {number} */
+export function daysBetween(a, b){
   const msPerDay = 24 * 60 * 60 * 1000;
   const utcA = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
   const utcB = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
@@ -44,14 +59,14 @@ function daysBetween(a, b){
 --------------------------------------------------- */
 function clampNum(v, min, max){ return Math.min(max, Math.max(min, v)); }
 
-function hexToRgb(hex){
+export function hexToRgb(hex){
   const clean = hex.replace('#', '');
   const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean;
   const bigint = parseInt(full, 16);
   return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
 }
 
-function rgbToHex(r, g, b){
+export function rgbToHex(r, g, b){
   const toHex = n => clampNum(Math.round(n), 0, 255).toString(16).padStart(2, '0');
   return '#' + toHex(r) + toHex(g) + toHex(b);
 }
@@ -100,12 +115,12 @@ function hslToRgb(h, s, l){
   };
 }
 
-function hexToHsl(hex){
+export function hexToHsl(hex){
   const { r, g, b } = hexToRgb(hex);
   return rgbToHsl(r, g, b);
 }
 
-function hslToHex(h, s, l){
+export function hslToHex(h, s, l){
   const { r, g, b } = hslToRgb(h, s, l);
   return rgbToHex(r, g, b);
 }
@@ -119,7 +134,7 @@ function hslToHex(h, s, l){
     wärmeren Farbton (wirkt wie ein eigenständiger, aber verwandter Sand-/
     Terracotta-Ton), Schmerz-Ton (pain) einen um +150° gedrehten, deutlich
     abgesetzten Kontrastton — beides analog zur Systematik der festen Themen. */
-function generateEarthyTheme(baseHex){
+export function generateEarthyTheme(baseHex){
   const { h, s } = hexToHsl(baseHex);
   const warmHue = (h + 25) % 360;
   const painHue = (h + 150) % 360;
@@ -161,7 +176,7 @@ function generateEarthyTheme(baseHex){
   return { light, dark };
 }
 
-function getMonthLabel(year, month0){
+export function getMonthLabel(year, month0){
   const label = new Date(year, month0, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
@@ -171,7 +186,7 @@ function getMonthLabel(year, month0){
     Zeitstempel (sollte praktisch nicht vorkommen, da loggedAt immer beim
     Anlegen gesetzt wird) fällt es auf die aktuelle Uhrzeit zurück, statt ein
     leeres Feld zu zeigen. */
-function timeInputValue(iso){
+export function timeInputValue(iso){
   const d = iso ? new Date(iso) : new Date();
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 }
@@ -180,7 +195,7 @@ function timeInputValue(iso){
     01-storage.js) in lokaler Zeit — für die automatisch erfasste Uhrzeit eines
     Schmerz-/Symptom-/Stimmungs-Eintrags (04-calendar.js). null bei fehlendem
     Zeitstempel (ältere, migrierte Einträge ohne Erfassungszeit). */
-function fmtTimeShort(iso){
+export function fmtTimeShort(iso){
   if (!iso) return null;
   return new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 }
@@ -188,7 +203,7 @@ function fmtTimeShort(iso){
 /** Escaped einen String für die sichere Verwendung als HTML-Attributwert
     (z.B. der Notiz-Text eines "Sonstige"-Schmerz-Eintrags, der beim Neu-
     Rendern des Sheets als value="..." wieder eingesetzt wird). */
-function escapeAttr(str){
+export function escapeAttr(str){
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
@@ -197,7 +212,7 @@ function escapeAttr(str){
 }
 
 /** year/month0 (0-basiert) um n Monate verschieben -> { year, month } */
-function shiftYearMonth(year, month0, n){
+export function shiftYearMonth(year, month0, n){
   const d = new Date(year, month0 + n, 1);
   return { year: d.getFullYear(), month: d.getMonth() };
 }
@@ -212,7 +227,8 @@ function shiftYearMonth(year, month0, n){
    Fenster-Schätzung (rückwärts von der Lutealphase, siehe APP_DATA.CYCLE_
    DEFAULTS.LUTEAL_PHASE_LENGTH — deutlich konstanter als die Follikelphase).
 --------------------------------------------------- */
-function average(numbers){
+/** @param {number[]} numbers @returns {number|null} */
+export function average(numbers){
   if (!numbers.length) return null;
   return numbers.reduce((sum, n) => sum + n, 0) / numbers.length;
 }
@@ -220,8 +236,9 @@ function average(numbers){
 /** Median (mittlerer Wert einer sortierten Liste) — robuster gegen einzelne
     Ausreißer als der Durchschnitt. Basis für detectOutlierMask() direkt
     darunter sowie für die Skalierung der Balkendiagramme (barChartSVG() in
-    07-chart.js, das diese Funktion mitverwendet). */
-function median(numbers){
+    07-chart.js, das diese Funktion mitverwendet).
+    @param {number[]} numbers @returns {number|null} */
+export function median(numbers){
   if (!numbers.length) return null;
   const sorted = [...numbers].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -239,7 +256,7 @@ function median(numbers){
     lücke, unabhängig von der individuellen Streuung). Braucht mindestens 4
     Werte, um zwischen echtem Ausreißer und normaler Schwankung unterscheiden
     zu können — bei weniger Werten wird sicherheitshalber nichts markiert. */
-function detectOutlierMask(values, absoluteThreshold){
+export function detectOutlierMask(values, absoluteThreshold){
   if (values.length < 4) return values.map(() => false);
   const med = median(values);
   const deviations = values.map(n => Math.abs(n - med));
@@ -260,7 +277,7 @@ function detectOutlierMask(values, absoluteThreshold){
     Reagiert dadurch schneller auf eine echte Verschiebung des Zyklus, ohne einzelne
     Ausreißer überzubewerten (die Streuungs-/Kappungslogik für die Vorhersage-Fenster-
     breite bleibt unverändert auf stdDeviation() der Rohwerte). */
-function weightedAverage(numbers, decay){
+export function weightedAverage(numbers, decay){
   if (!numbers.length) return null;
   const r = decay ?? 0.85;
   const n = numbers.length;
@@ -279,14 +296,15 @@ function weightedAverage(numbers, decay){
     über die Mindestbreite von 3 Tagen vor/nach hinaus verbreitert: ein unregel-
     mäßiger Zyklus ergibt ein breiteres Fenster (gleiches Prinzip wie bei Drip, wo
     die Bandbreite ebenfalls an der Standardabweichung hängt). */
-function stdDeviation(numbers){
+export function stdDeviation(numbers){
   if (numbers.length < 2) return null;
   const avg = average(numbers);
   const variance = numbers.reduce((sum, n) => sum + (n - avg) ** 2, 0) / (numbers.length - 1);
   return Math.sqrt(variance);
 }
 
-function computeCycleStats(periods, today){
+/** @param {Period[]} periods @param {Date} today @returns {CycleStats} */
+export function computeCycleStats(periods, today){
   const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
   if (!sorted.length){
     return { hasData: false, hasPrediction: false };
@@ -415,7 +433,7 @@ function computeCycleStats(periods, today){
 /** Zyklusphase für ein beliebiges Datum anhand der Perioden-Historie. sortedPeriods
     muss chronologisch aufsteigend sortiert sein. Gibt null zurück, wenn das Datum
     vor der ersten erfassten Periode liegt (keine Zuordnung möglich). */
-function classifyPhaseForDate(iso, sortedPeriods, avgCycleLength){
+export function classifyPhaseForDate(iso, sortedPeriods, avgCycleLength){
   if (sortedPeriods.some(p => iso >= p.start && iso <= p.end)) return 'Menstruation';
 
   // Letzte Periode VOR (oder an) diesem Datum als Zyklus-Referenzpunkt suchen.
@@ -454,7 +472,7 @@ function classifyPhaseForDate(iso, sortedPeriods, avgCycleLength){
     Index (0, 1, 2, …) als x-Achse — für die Trend-Linie im Zykluslängen-
     Trend-Diagramm (07-chart.js). Gibt slope (Änderung je Schritt) und
     intercept zurück; bei weniger als 2 Werten null (keine Gerade bestimmbar). */
-function computeLinearTrend(values){
+export function computeLinearTrend(values){
   const n = values.length;
   if (n < 2) return null;
   const xs = values.map((_, i) => i);
@@ -478,7 +496,7 @@ function computeLinearTrend(values){
     sondern reiner Zufall/ein anderer Zyklusabschnitt). Braucht mindestens 3
     verwertbare Vorkommen, sonst null (zu wenig Daten für eine verlässliche
     Aussage). */
-function computeLeadTimeInsight(periods, isoList){
+export function computeLeadTimeInsight(periods, isoList){
   const sortedPeriods = [...periods].sort((a, b) => a.start.localeCompare(b.start));
   if (!sortedPeriods.length) return null;
 
@@ -493,12 +511,12 @@ function computeLeadTimeInsight(periods, isoList){
   if (offsets.length < 3) return null;
   return { avgDaysBefore: average(offsets), count: offsets.length };
 }
-  const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
+
 /** Zählt Vorkommen (isoList darf Duplikate enthalten -> ein Datum mit mehreren
     Einträgen zählt entsprechend mehrfach) je Zyklusphase und ermittelt die
     häufigste Phase. Generische Basis für "Schmerzen/Symptome/Stimmung nach
     Zyklusphase" (07-chart.js). */
-function computePhaseOccurrenceStats(periods, isoList){
+export function computePhaseOccurrenceStats(periods, isoList){
   const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
   const cycleLengths = [];
   for (let i = 0; i < sorted.length - 1; i++){
@@ -533,7 +551,7 @@ function computePhaseOccurrenceStats(periods, isoList){
     Intensitäts-Durchschnitt ein, zählen aber weiterhin als Schmerz-Eintrag
     (avgIntensityCount vs. totalCount unterscheiden das).
     dayLogsArray: Array wie von loadDayLogs()/State.dayLogs.values() geliefert. */
-function computePainStats(periods, dayLogsArray){
+export function computePainStats(periods, dayLogsArray){
   const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
   const cycleLengths = [];
   for (let i = 0; i < sorted.length - 1; i++){
@@ -568,7 +586,7 @@ function computePainStats(periods, dayLogsArray){
     vorkommt (id -> Anzahl Tage). field: 'symptoms' | 'moods'. Einträge sind
     { id, loggedAt }-Objekte (siehe toggleSymptomEntry()/toggleMoodEntry() in
     01-storage.js), nur die id fließt in die Zählung ein. */
-function computeItemFrequency(dayLogsArray, field){
+export function computeItemFrequency(dayLogsArray, field){
   const counts = {};
   dayLogsArray.forEach(day => {
     (day[field] || []).forEach(item => { counts[item.id] = (counts[item.id] || 0) + 1; });
@@ -579,7 +597,7 @@ function computeItemFrequency(dayLogsArray, field){
 /** Wandelt ein id->Anzahl-Objekt (computeItemFrequency()) in absteigend
     sortierte { id, label, count }-Zeilen um, Labels aus dem übergebenen
     Katalog (symptomCatalog()/moodCatalog(), 02-state-theme.js) aufgelöst. */
-function topItemsFromCounts(counts, catalog, limit){
+export function topItemsFromCounts(counts, catalog, limit){
   return Object.keys(counts)
     .map(id => {
       const item = catalog.find(c => c.id === id);
@@ -592,7 +610,7 @@ function topItemsFromCounts(counts, catalog, limit){
 /** Flache Liste aller (ggf. wiederholten) Daten, an denen mindestens ein
     Eintrag im Feld `field` ('symptoms' | 'moods') vorhanden war — ein Datum
     mit z.B. 3 Symptomen erscheint 3x (Gewichtung für computePhaseOccurrenceStats()). */
-function flattenFieldOccurrences(dayLogsArray, field){
+export function flattenFieldOccurrences(dayLogsArray, field){
   const list = [];
   dayLogsArray.forEach(day => {
     (day[field] || []).forEach(() => list.push(day.date));
@@ -606,7 +624,7 @@ function flattenFieldOccurrences(dayLogsArray, field){
    sowie je Übergang zwischen zwei Perioden die Zykluslänge, jeweils
    chronologisch sortiert mit Startdatum als Label-Basis.
 --------------------------------------------------- */
-function computeChartData(periods){
+export function computeChartData(periods){
   const sorted = [...periods].sort((a, b) => a.start.localeCompare(b.start));
   const periodLengths = sorted.map(p => ({
     start: p.start,

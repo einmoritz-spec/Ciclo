@@ -1,3 +1,9 @@
+import { State, isItemHidden, wireVisibilityLongPress } from './02-state-theme.js';
+import { average, computeChartData, computeLinearTrend, computePainStats, computePhaseOccurrenceStats, flattenFieldOccurrences, median, parseISODate } from './03-utils.js';
+import { appLogoButtonHTML, bottomNavHTML, goCalendarHome, wireBottomNav } from './05-navigation.js';
+import { goSettings } from './09-settings.js';
+import { APP_DATA } from './data/app-data.js';
+
 /* ---------------------------------------------------
    CHART (zweiter Bottom-Nav-Tab)
    Zeigt Periodendauer und Zykluslänge je erfasstem Eintrag als einfache
@@ -7,11 +13,11 @@
    diese Datei kennt kein Storage-Detail, nur State.periods.
 --------------------------------------------------- */
 
-function fmtDateShort(date){
+export function fmtDateShort(date){
   return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
 }
 
-function fmtDaysAvg(value){
+export function fmtDaysAvg(value){
   return value.toFixed(1).replace('.', ',');
 }
 
@@ -26,7 +32,7 @@ function fmtDaysAvg(value){
     die die daraus resultierende Obergrenze überschreiten, werden oben
     gekappt und mit einer kleinen Bruchmarkierung („⁄⁄“) sichtbar als
     abgeschnitten markiert — die echte Zahl bleibt trotzdem als Label stehen. */
-function barChartSVG(entries, barColorVar, avgValue){
+export function barChartSVG(entries, barColorVar, avgValue){
   const barWidth = 22;
   const gap = 16;
   const chartHeight = 120;
@@ -68,7 +74,7 @@ function barChartSVG(entries, barColorVar, avgValue){
 /** Einfaches Balkendiagramm für eine feste, kleine Kategorie-Anzahl (hier: die
     4 Zyklusphasen) — bewusst separat von barChartSVG() oben, da hier keine
     Zeitachse/Ø-Linie/Skalen-Kappung gebraucht wird, dafür mehrzeilige Labels. */
-function categoryBarChartSVG(entries, barColorVar){
+export function categoryBarChartSVG(entries, barColorVar){
   const barWidth = 46;
   const gap = 20;
   const chartHeight = 110;
@@ -311,7 +317,7 @@ function chartBodyHTML(){
   return `<div class="chart-view-scroll">${periodCard}${cycleCard}${cycleTrendCard}${painPhaseCard}${painTimeCard}${symptomsPhaseCard}${moodsPhaseCard}</div>`;
 }
 
-function renderChartView(){
+export function renderChartView(){
   const app = document.getElementById('app');
   app.innerHTML = `
     <header class="app-header app-header-row">

@@ -1,3 +1,11 @@
+import { addCustomMood, addCustomSymptom, addPainEntry, addPeriodEntry, deletePeriodEntry, emptyDayEntry, loadPeriods, removePainEntry, setDayNote, toggleMoodEntry, togglePainDayQuick, toggleSymptomEntry, updateMoodTime, updatePainEntry, updatePeriodEntry, updateSymptomTime } from './01-storage.js';
+import { State, attachLongPress, moodCatalog, symptomCatalog } from './02-state-theme.js';
+import { addDays, computeCycleStats, daysBetween, escapeAttr, fmtTimeShort, formatISODate, getMonthLabel, isToday, parseISODate, shiftYearMonth, timeInputValue } from './03-utils.js';
+import { appLogoButtonHTML, bottomNavHTML, goCalendarHome, wireBottomNav } from './05-navigation.js';
+import { fmtDateReadable } from './08-stats-progress.js';
+import { goSettings } from './09-settings.js';
+import { APP_DATA } from './data/app-data.js';
+
 /* ---------------------------------------------------
    KALENDER (Startseite)
    Fortlaufende Monatsliste (wie 04-calendar.js der Trainings-App), aber in
@@ -277,7 +285,9 @@ function painEntryLabel(entry){
 }
 
 /** Liste bereits erfasster Schmerz-Einträge des Tages, je Zeile mit ×-Button
-    zum Entfernen (removePainEntry() in 01-storage.js). */
+    zum Entfernen (removePainEntry() in 01-storage.js). Ein langer Druck auf
+    die Zeile selbst öffnet das volle Bearbeiten-Formular (siehe
+    painSubformHTML() unten, Aufruf über wireDaySheetBody()). */
 function painEntryListHTML(entry){
   if (!entry.pain.length) return '<p class="day-sheet-empty-hint">Noch keine Schmerz-Einträge.</p>';
   return entry.pain.map(p => `
@@ -288,11 +298,16 @@ function painEntryListHTML(entry){
   `).join('');
 }
 
-/** Kleines Unterformular zum Anlegen EINES neuen Schmerz-Eintrags: Kategorie
-    (Einfachauswahl-Chips), Intensität (Schieberegler 1–10), Tageszeit
-    (Einfachauswahl-Chips) und — nur bei Kategorie "Sonstige" — ein freies
-    Textfeld für eine kurze Beschreibung. Wird nur gezeigt, wenn draft nicht
-    null ist (Tap auf "+ Schmerz hinzufügen", siehe wireDaySheet()). */
+/** Unterformular zum Anlegen EINES neuen Schmerz-Eintrags ODER zum
+    vollständigen Bearbeiten eines bereits bestehenden (draft.editId gesetzt,
+    siehe wireDaySheetBody()) — beide teilen sich dieselben Felder: Kategorie
+    (Einfachauswahl-Chips), Intensität (Schieberegler 1–10), Tageszeit-Kategorie
+    (Einfachauswahl-Chips), — nur bei Kategorie "Sonstige" — ein freies
+    Textfeld, UND eine manuell wählbare Uhrzeit (draft.time). Die Uhrzeit ist
+    bewusst IMMER editierbar (nicht nur beim nachträglichen Bearbeiten): ein
+    rückwirkend für einen vergangenen Tag angelegter Eintrag soll nicht
+    zwangsläufig die aktuelle Uhrzeit bekommen, sondern die tatsächliche.
+    Wird nur gezeigt, wenn draft nicht null ist. */
 function painSubformHTML(draft){
   if (!draft) return '';
   const catChips = APP_DATA.PAIN_CATEGORIES.map(c => `
@@ -312,11 +327,13 @@ function painSubformHTML(draft){
       ${noteFieldHTML}
       <p class="pain-subform-label">Wie stark? <strong>${draft.intensity}/10</strong></p>
       <input type="range" min="1" max="10" step="1" value="${draft.intensity}" class="intensity-slider" id="painDraftIntensity">
-      <p class="pain-subform-label">Wann?</p>
+      <p class="pain-subform-label">Tageszeit?</p>
       <div class="chip-row">${timeChips}</div>
+      <p class="pain-subform-label">Uhrzeit</p>
+      <input type="time" class="chip-add-input" id="painDraftTime" value="${draft.time}">
       <div class="pain-subform-actions">
         <button type="button" class="pain-sheet-btn pain-sheet-btn--secondary" id="painDraftCancelBtn">Abbrechen</button>
-        <button type="button" class="pain-sheet-btn" id="painDraftAddBtn" ${draft.category ? '' : 'disabled'}>Hinzufügen</button>
+        <button type="button" class="pain-sheet-btn" id="painDraftAddBtn" ${draft.category ? '' : 'disabled'}>${draft.editId ? 'Speichern' : 'Hinzufügen'}</button>
       </div>
     </div>
   `;
@@ -357,17 +374,19 @@ let daySheetISO = null;
 // beim Verlassen des Feldes (onblur) wird tatsächlich gespeichert.
 let dayNoteDraft = '';
 
-// Ziel eines gerade offenen Zeit-Editors (langer Druck auf einen Schmerz-
-// Eintrag/Symptom-/Stimmungs-Chip, siehe attachLongPress()-Wiring in
-// wireDaySheetBody()) — { kind: 'pain'|'symptom'|'mood', id } oder null.
-// Erlaubt, die automatisch erfasste Uhrzeit eines bereits gespeicherten
-// Eintrags nachträglich manuell zu korrigieren.
+// Ziel eines gerade offenen Zeit-Editors für ein Symptom/eine Stimmung
+// (langer Druck auf einen bereits ausgewählten Chip, siehe
+// attachLongPress()-Wiring in wireDaySheetBody()) — { kind: 'symptom'|'mood',
+// id } oder null. Erlaubt, die automatisch erfasste Uhrzeit nachträglich
+// manuell zu korrigieren. Schmerz-Einträge haben ein eigenes, volles
+// Bearbeiten-Formular (painDraft.editId, siehe painSubformHTML() oben) statt
+// dieses reinen Zeit-Editors, da sie mehr Felder als nur die Uhrzeit haben.
 let timeEditTarget = null;
 
-/** Inline-Editor zum manuellen Setzen der Uhrzeit eines bereits erfassten
-    Schmerz-Eintrags/Symptoms/Stimmung — erscheint nach langem Druck auf den
-    jeweiligen Eintrag/Chip (siehe wireDaySheetBody()). Nutzt dieselbe Optik
-    wie das Schmerz-Unterformular (.pain-subform). */
+/** Inline-Editor zum manuellen Setzen der Uhrzeit eines bereits ausgewählten
+    Symptoms/einer Stimmung — erscheint nach langem Druck auf den jeweiligen
+    Chip (siehe wireDaySheetBody()). Nutzt dieselbe Optik wie das
+    Schmerz-Unterformular (.pain-subform). */
 function timeEditorHTML(label, currentTimeValue){
   return `
     <div class="pain-subform" id="timeEditor">
@@ -388,11 +407,9 @@ function timeEditorHTML(label, currentTimeValue){
 function daySheetBodyHTML(iso){
   const entry = State.dayLogs.get(iso) || emptyDayEntry(iso);
 
-  const painEditItem = timeEditTarget && timeEditTarget.kind === 'pain'
-    ? entry.pain.find(p => p.id === timeEditTarget.id) : null;
-  const painBottomHTML = painEditItem
-    ? timeEditorHTML(painEntryLabel(painEditItem).split(' · ')[0], timeInputValue(painEditItem.loggedAt))
-    : (painDraft ? painSubformHTML(painDraft) : '<button type="button" class="day-sheet-add-btn" id="addPainEntryBtn">+ Schmerz hinzufügen</button>');
+  const painBottomHTML = painDraft
+    ? painSubformHTML(painDraft)
+    : '<button type="button" class="day-sheet-add-btn" id="addPainEntryBtn">+ Schmerz hinzufügen</button>';
 
   const symptomEditItem = timeEditTarget && timeEditTarget.kind === 'symptom'
     ? entry.symptoms.find(s => s.id === timeEditTarget.id) : null;
@@ -414,7 +431,7 @@ function daySheetBodyHTML(iso){
 
     <div class="day-sheet-section">
       <p class="day-sheet-section-title">Schmerzen</p>
-      <p class="day-sheet-hint">Zum Bearbeiten der Uhrzeit einen Eintrag lange gedrückt halten.</p>
+      <p class="day-sheet-hint">Zum Bearbeiten (Kategorie, Stärke, Uhrzeit, …) einen Eintrag lange gedrückt halten.</p>
       <div class="pain-entry-list" id="painEntryList">${painEntryListHTML(entry)}</div>
       ${painBottomHTML}
     </div>
@@ -465,8 +482,7 @@ function wireDaySheetBody(){
 
   const addBtn = document.getElementById('addPainEntryBtn');
   if (addBtn) addBtn.onclick = () => {
-    painDraft = { category: null, intensity: 5, timeOfDay: null, note: '' };
-    timeEditTarget = null;
+    painDraft = { editId: null, category: null, intensity: 5, timeOfDay: null, note: '', time: timeInputValue(null) };
     renderDaySheetContent();
   };
 
@@ -486,16 +502,22 @@ function wireDaySheetBody(){
   if (intensityInput) intensityInput.oninput = () => { painDraft.intensity = Number(intensityInput.value); };
   if (intensityInput) intensityInput.onchange = () => { painDraft.intensity = Number(intensityInput.value); renderDaySheetContent(); };
 
-  // Kein Re-Render bei jedem Tastendruck (anders als bei den Chips/dem
-  // Slider) — sonst würde das Textfeld bei jeder Eingabe den Fokus verlieren.
-  // Der Wert wird trotzdem sofort im Entwurf (painDraft) mitgeführt.
+  // Kein Re-Render bei jedem Tastendruck/jeder Uhrzeit-Änderung (anders als
+  // bei den Chips/dem Slider) — sonst würde das Feld bei jeder Eingabe den
+  // Fokus verlieren. Der Wert wird trotzdem sofort im Entwurf (painDraft)
+  // mitgeführt.
   const noteInput = document.getElementById('painDraftNote');
   if (noteInput) noteInput.oninput = () => { painDraft.note = noteInput.value; };
+  const timeInput = document.getElementById('painDraftTime');
+  if (timeInput) timeInput.oninput = () => { painDraft.time = timeInput.value; };
 
   const addDraftBtn = document.getElementById('painDraftAddBtn');
   if (addDraftBtn) addDraftBtn.onclick = () => {
     if (!painDraft.category) return;
-    State.dayLogs = new Map(addPainEntry(daySheetISO, painDraft).map(e => [e.date, e]));
+    const updated = painDraft.editId
+      ? updatePainEntry(daySheetISO, painDraft.editId, painDraft)
+      : addPainEntry(daySheetISO, painDraft);
+    State.dayLogs = new Map(updated.map(e => [e.date, e]));
     painDraft = null;
     renderDaySheetContent();
   };
@@ -506,13 +528,23 @@ function wireDaySheetBody(){
       renderDaySheetContent();
     };
   });
-  // Langer Druck auf einen Schmerz-Eintrag öffnet den Zeit-Editor für genau
-  // diesen Eintrag (siehe timeEditorHTML() oben) — ein kurzer Tap tut nichts
-  // (nur der ×-Button innerhalb der Zeile reagiert auf normale Taps).
+  // Langer Druck auf einen Schmerz-Eintrag öffnet das volle Bearbeiten-
+  // Formular (Kategorie/Intensität/Tageszeit/Notiz/Uhrzeit, vorausgefüllt mit
+  // den bisherigen Werten) — ein kurzer Tap tut nichts (nur der ×-Button
+  // innerhalb der Zeile reagiert auf normale Taps).
   document.querySelectorAll('.pain-entry-row').forEach(row => {
     attachLongPress(row, () => {
-      painDraft = null;
-      timeEditTarget = { kind: 'pain', id: row.dataset.entryId };
+      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+      const item = entry.pain.find(p => p.id === row.dataset.entryId);
+      if (!item) return;
+      painDraft = {
+        editId: item.id,
+        category: item.category,
+        intensity: item.intensity ?? 5,
+        timeOfDay: item.timeOfDay,
+        note: item.note || '',
+        time: timeInputValue(item.loggedAt)
+      };
       renderDaySheetContent();
     });
   });
@@ -553,10 +585,9 @@ function wireDaySheetBody(){
   if (timeEditorSaveBtn) timeEditorSaveBtn.onclick = () => {
     const value = timeEditorInput.value;
     if (!value) return;
-    let updated;
-    if (timeEditTarget.kind === 'pain') updated = updatePainEntryTime(daySheetISO, timeEditTarget.id, value);
-    else if (timeEditTarget.kind === 'symptom') updated = updateSymptomTime(daySheetISO, timeEditTarget.id, value);
-    else updated = updateMoodTime(daySheetISO, timeEditTarget.id, value);
+    const updated = timeEditTarget.kind === 'symptom'
+      ? updateSymptomTime(daySheetISO, timeEditTarget.id, value)
+      : updateMoodTime(daySheetISO, timeEditTarget.id, value);
     State.dayLogs = new Map(updated.map(e => [e.date, e]));
     timeEditTarget = null;
     renderDaySheetContent();
@@ -773,14 +804,14 @@ function setupCalendarObservers(){
   calendarBottomObserver.observe(bottomSentinel);
 }
 
-function scrollToCurrentMonth(){
+export function scrollToCurrentMonth(){
   const y = State.today.getFullYear();
   const m = State.today.getMonth();
   const block = document.querySelector(`.month-block[data-year="${y}"][data-month="${m}"]`);
   if (block) block.scrollIntoView({ block: 'start' });
 }
 
-function renderCalendarView(){
+export function renderCalendarView(){
   const app = document.getElementById('app');
   app.innerHTML = `
     <header class="app-header app-header-row">

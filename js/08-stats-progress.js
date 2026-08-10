@@ -1,3 +1,10 @@
+import { State, isItemHidden, moodCatalog, symptomCatalog, wireVisibilityLongPress } from './02-state-theme.js';
+import { computeCycleStats, computeItemFrequency, computeLeadTimeInsight, computePainStats, flattenFieldOccurrences, topItemsFromCounts } from './03-utils.js';
+import { appLogoButtonHTML, bottomNavHTML, goCalendarHome, wireBottomNav } from './05-navigation.js';
+import { fmtDaysAvg } from './07-chart.js';
+import { goSettings } from './09-settings.js';
+import { APP_DATA } from './data/app-data.js';
+
 /* ---------------------------------------------------
    STATS (dritter Bottom-Nav-Tab)
    Reine Darstellung — die eigentliche Berechnung übernimmt komplett
@@ -6,7 +13,7 @@
    State.periods + das fertige Stats-Objekt.
 --------------------------------------------------- */
 
-function fmtDateReadable(date){
+export function fmtDateReadable(date){
   return date.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
 }
 
@@ -174,7 +181,7 @@ function symptomsSectionHTML(){
   `;
 }
 
-function renderStatsView(){
+export function renderStatsView(){
   const app = document.getElementById('app');
   const stats = computeCycleStats(State.periods, State.today);
 
