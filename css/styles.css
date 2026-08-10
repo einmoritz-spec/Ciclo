@@ -65,9 +65,15 @@
 html, body{
   height: 100%;
   margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
 }
 body{
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   font-family: var(--font-family);
   background: var(--color-bg);
   color: var(--color-text-day);
