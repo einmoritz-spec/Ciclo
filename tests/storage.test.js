@@ -3,8 +3,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   loadPeriods, addPeriodEntry, deletePeriodEntry, updatePeriodEntry,
   loadDayLogs, togglePainDayQuick, addPainEntry, removePainEntry,
-  toggleSymptomEntry, toggleMoodEntry, setDayNote,
-  updatePainEntry, updateSymptomTime,
+  addSymptomOccurrence, removeSymptomOccurrence, updateSymptomOccurrenceTime,
+  addMoodOccurrence, removeMoodOccurrence, updateMoodOccurrenceTime,
+  setDayNote, updatePainEntry,
   loadCustomItems, addCustomSymptom, addCustomMood, renameCustomItem, deleteCustomItem,
   loadSettings, saveSettings, exportAllData, importAllData,
   setHardUpdatePending, consumeHardUpdatePending
@@ -112,28 +113,70 @@ describe('Schmerz — "Detailliert"-Modus', () => {
   });
 });
 
-describe('Symptome & Stimmung', () => {
-  it('toggleSymptomEntry schaltet ein Symptom an und wieder aus', () => {
-    let logs = toggleSymptomEntry('2026-01-05', 'muedigkeit');
+describe('Symptome & Stimmung — Mehrfach-Tracking', () => {
+  it('addSymptomOccurrence fügt ein neues Vorkommen mit Uhrzeit hinzu', () => {
+    const logs = addSymptomOccurrence('2026-01-05', 'muedigkeit');
     expect(logs[0].symptoms).toHaveLength(1);
+    expect(logs[0].symptoms[0].catalogId).toBe('muedigkeit');
     expect(logs[0].symptoms[0].loggedAt).toBeTruthy();
-    logs = toggleSymptomEntry('2026-01-05', 'muedigkeit');
-    expect(logs).toHaveLength(0);
   });
 
-  it('toggleMoodEntry ist unabhängig von toggleSymptomEntry am selben Tag', () => {
-    toggleSymptomEntry('2026-01-05', 'muedigkeit');
-    const logs = toggleMoodEntry('2026-01-05', 'reizbar');
+  it('mehrfaches addSymptomOccurrence am selben Tag zählt hoch statt zu toggeln', () => {
+    addSymptomOccurrence('2026-01-05', 'uebelkeit');
+    addSymptomOccurrence('2026-01-05', 'uebelkeit');
+    const logs = addSymptomOccurrence('2026-01-05', 'uebelkeit');
+    expect(logs[0].symptoms).toHaveLength(3);
+    expect(logs[0].symptoms.every(s => s.catalogId === 'uebelkeit')).toBe(true);
+    // jedes Vorkommen hat eine eigene, eindeutige id
+    const ids = new Set(logs[0].symptoms.map(s => s.id));
+    expect(ids.size).toBe(3);
+  });
+
+  it('removeSymptomOccurrence entfernt genau EIN Vorkommen, nicht alle gleichnamigen', () => {
+    addSymptomOccurrence('2026-01-05', 'uebelkeit');
+    addSymptomOccurrence('2026-01-05', 'uebelkeit');
+    const targetId = loadDayLogs()[0].symptoms[0].id;
+    const logs = removeSymptomOccurrence('2026-01-05', targetId);
+    expect(logs[0].symptoms).toHaveLength(1);
+  });
+
+  it('addMoodOccurrence ist unabhängig von addSymptomOccurrence am selben Tag', () => {
+    addSymptomOccurrence('2026-01-05', 'muedigkeit');
+    const logs = addMoodOccurrence('2026-01-05', 'reizbar');
     expect(logs[0].symptoms).toHaveLength(1);
     expect(logs[0].moods).toHaveLength(1);
   });
 
-  it('updateSymptomTime setzt eine manuelle Uhrzeit für ein bereits gewähltes Symptom', () => {
-    toggleSymptomEntry('2026-01-05', 'muedigkeit');
-    const logs = updateSymptomTime('2026-01-05', 'muedigkeit', '09:15');
+  it('removeMoodOccurrence entfernt genau ein Vorkommen', () => {
+    addMoodOccurrence('2026-01-05', 'reizbar');
+    addMoodOccurrence('2026-01-05', 'reizbar');
+    const targetId = loadDayLogs()[0].moods[0].id;
+    const logs = removeMoodOccurrence('2026-01-05', targetId);
+    expect(logs[0].moods).toHaveLength(1);
+  });
+
+  it('updateSymptomOccurrenceTime setzt eine manuelle Uhrzeit für ein bestimmtes Vorkommen', () => {
+    addSymptomOccurrence('2026-01-05', 'muedigkeit');
+    const entryId = loadDayLogs()[0].symptoms[0].id;
+    const logs = updateSymptomOccurrenceTime('2026-01-05', entryId, '09:15');
     const loggedDate = new Date(logs[0].symptoms[0].loggedAt);
     expect(loggedDate.getHours()).toBe(9);
     expect(loggedDate.getMinutes()).toBe(15);
+  });
+
+  it('updateMoodOccurrenceTime setzt eine manuelle Uhrzeit für ein bestimmtes Vorkommen', () => {
+    addMoodOccurrence('2026-01-05', 'reizbar');
+    const entryId = loadDayLogs()[0].moods[0].id;
+    const logs = updateMoodOccurrenceTime('2026-01-05', entryId, '21:00');
+    const loggedDate = new Date(logs[0].moods[0].loggedAt);
+    expect(loggedDate.getHours()).toBe(21);
+  });
+
+  it('Entfernen des letzten Vorkommens leert den Tag komplett', () => {
+    addSymptomOccurrence('2026-01-05', 'muedigkeit');
+    const entryId = loadDayLogs()[0].symptoms[0].id;
+    const logs = removeSymptomOccurrence('2026-01-05', entryId);
+    expect(logs).toHaveLength(0);
   });
 });
 
@@ -174,7 +217,7 @@ describe('Eigene Kategorien', () => {
 
   it('deleteCustomItem entfernt den Katalog-Eintrag UND bereinigt bestehende Tages-Logs', () => {
     const { item } = addCustomSymptom('Herzrasen');
-    toggleSymptomEntry('2026-01-05', item.id);
+    addSymptomOccurrence('2026-01-05', item.id);
     expect(loadDayLogs()[0].symptoms).toHaveLength(1);
 
     const result = deleteCustomItem('symptoms', item.id);
@@ -183,9 +226,20 @@ describe('Eigene Kategorien', () => {
     expect(result.dayLogs).toHaveLength(0);
   });
 
+  it('deleteCustomItem entfernt ALLE Vorkommen eines mehrfach getrackten eigenen Symptoms', () => {
+    const { item } = addCustomSymptom('Herzrasen');
+    addSymptomOccurrence('2026-01-05', item.id);
+    addSymptomOccurrence('2026-01-05', item.id);
+    addSymptomOccurrence('2026-01-05', item.id);
+    expect(loadDayLogs()[0].symptoms).toHaveLength(3);
+
+    const result = deleteCustomItem('symptoms', item.id);
+    expect(result.dayLogs).toHaveLength(0);
+  });
+
   it('deleteCustomItem lässt andere Einträge desselben Tages unangetastet', () => {
     const { item } = addCustomSymptom('Herzrasen');
-    toggleSymptomEntry('2026-01-05', item.id);
+    addSymptomOccurrence('2026-01-05', item.id);
     addPainEntry('2026-01-05', { category: 'kopf', intensity: 4, timeOfDay: null });
 
     const result = deleteCustomItem('symptoms', item.id);
@@ -214,7 +268,7 @@ describe('Backup Export/Import', () => {
   it('exportAllData/importAllData sind ein vollständiger Roundtrip', () => {
     addPeriodEntry('2026-01-01', '2026-01-05');
     addPainEntry('2026-01-02', { category: 'kopf', intensity: 6, timeOfDay: 'morning' });
-    toggleMoodEntry('2026-01-02', 'reizbar');
+    addMoodOccurrence('2026-01-02', 'reizbar');
     saveSettings({ colorScheme: 'dark', themePreset: 'wald', detailLevel: 'detailed', hiddenItems: [] });
 
     const backup = exportAllData();

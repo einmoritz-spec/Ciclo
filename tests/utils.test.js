@@ -214,8 +214,8 @@ describe('computeLeadTimeInsight', () => {
 describe('Beschwerden-Auswertung (Schmerz/Symptome/Stimmung)', () => {
   const periods = [period('2026-01-01', '2026-01-05')];
   const dayLogs = [
-    { date: '2026-01-02', note: null, pain: [{ id: 'p1', category: 'kopf', intensity: 7, timeOfDay: 'morning', note: null, loggedAt: null }], symptoms: [{ id: 'muedigkeit', loggedAt: null }], moods: [] },
-    { date: '2026-01-10', note: null, pain: [{ id: 'p2', category: 'kopf', intensity: 3, timeOfDay: 'evening', note: null, loggedAt: null }], symptoms: [], moods: [{ id: 'reizbar', loggedAt: null }] }
+    { date: '2026-01-02', note: null, pain: [{ id: 'p1', category: 'kopf', intensity: 7, timeOfDay: 'morning', note: null, loggedAt: null }], symptoms: [{ id: 's1', catalogId: 'muedigkeit', loggedAt: null }], moods: [] },
+    { date: '2026-01-10', note: null, pain: [{ id: 'p2', category: 'kopf', intensity: 3, timeOfDay: 'evening', note: null, loggedAt: null }], symptoms: [], moods: [{ id: 'm1', catalogId: 'reizbar', loggedAt: null }] }
   ];
 
   it('computePainStats berechnet die Ø-Intensität nur über Einträge mit Intensität', () => {
@@ -226,9 +226,20 @@ describe('Beschwerden-Auswertung (Schmerz/Symptome/Stimmung)', () => {
     expect(stats.byTimeOfDay.evening).toBe(1);
   });
 
-  it('computeItemFrequency zählt Symptom-/Stimmungs-IDs über alle Tage', () => {
+  it('computeItemFrequency zählt Symptom-/Stimmungs-catalogIds über alle Tage', () => {
     expect(computeItemFrequency(dayLogs, 'symptoms')).toEqual({ muedigkeit: 1 });
     expect(computeItemFrequency(dayLogs, 'moods')).toEqual({ reizbar: 1 });
+  });
+
+  it('computeItemFrequency zählt mehrere Vorkommen desselben Symptoms am selben Tag korrekt hoch', () => {
+    const multiDayLogs = [
+      { date: '2026-01-02', note: null, pain: [], symptoms: [
+        { id: 's1', catalogId: 'uebelkeit', loggedAt: null },
+        { id: 's2', catalogId: 'uebelkeit', loggedAt: null },
+        { id: 's3', catalogId: 'uebelkeit', loggedAt: null }
+      ], moods: [] }
+    ];
+    expect(computeItemFrequency(multiDayLogs, 'symptoms')).toEqual({ uebelkeit: 3 });
   });
 
   it('topItemsFromCounts sortiert absteigend und löst Labels aus dem Katalog auf', () => {
@@ -239,7 +250,7 @@ describe('Beschwerden-Auswertung (Schmerz/Symptome/Stimmung)', () => {
   });
 
   it('flattenFieldOccurrences liefert das Datum einmal je Vorkommen (Gewichtung)', () => {
-    const withTwoSymptoms = [{ date: '2026-01-02', symptoms: [{ id: 'a' }, { id: 'b' }], moods: [] }];
+    const withTwoSymptoms = [{ date: '2026-01-02', symptoms: [{ id: 's1', catalogId: 'a' }, { id: 's2', catalogId: 'b' }], moods: [] }];
     expect(flattenFieldOccurrences(withTwoSymptoms, 'symptoms')).toEqual(['2026-01-02', '2026-01-02']);
   });
 });

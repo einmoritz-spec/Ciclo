@@ -423,14 +423,16 @@ button{
   line-height: 1;
 }
 
-/* Wiederverwendbare Mehrfachauswahl-Chips (Schmerz-Kategorie/-Tageszeit,
-   Symptome, Stimmung) */
+/* Wiederverwendbare Mehrfachauswahl-Chips (Schmerz-Kategorie/-Tageszeit) UND
+   Mehrfach-Tracking-Chips (Symptome/Stimmung, siehe chipRowHTML() in
+   04-calendar.js) */
 .chip-row{
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 .chip{
+  position: relative;
   padding: 9px 14px;
   border-radius: 999px;
   background: var(--color-bg);
@@ -438,15 +440,53 @@ button{
   font-weight: 700;
   color: var(--color-text-heading);
 }
+/* Einfachauswahl (Schmerz-Kategorie/-Tageszeit im Formular, siehe
+   painSubformHTML()): klar hervorgehoben, da es ein exklusiver "ausgewählt"-
+   Zustand ist. */
 .chip.is-selected{
   background: var(--color-pain);
   color: #FFFFFF;
 }
-.day-sheet-time-hint{
-  margin: 8px 2px 0;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  line-height: 1.5;
+/* Mehrfach-Tracking (Symptome/Stimmung): BEWUSST kein starkes Ausgewählt-
+   Aussehen mehr, sondern nur ein dezenter Rahmen — der Chip ist kein an/aus-
+   Schalter mehr, sondern ein Zähler (siehe chip-count-badge unten), erneutes
+   Tippen trackt erneut statt abzuwählen. */
+.chip.is-tracked{
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+.chip-count-badge{
+  position: absolute;
+  top: -7px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #FFFFFF;
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+/* Liste der einzelnen Zeitpunkte eines mehrfach getrackten Symptoms/einer
+   Stimmung (occurrenceEditorHTML(), 04-calendar.js) — erscheint nach langem
+   Druck auf einen bereits getrackten Chip. */
+.occurrence-list{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.occurrence-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.occurrence-row .occurrence-time-input{
+  flex: 1 1 auto;
 }
 .chip-add-row{
   display: flex;

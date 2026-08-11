@@ -49,13 +49,19 @@
  */
 
 /**
- * Ein ausgewähltes Symptom/eine ausgewählte Stimmung an einem Tag, mit dem
- * Zeitpunkt der (Erst-)Erfassung. `id` referenziert entweder einen Eintrag
- * aus APP_DATA.SYMPTOM_CATEGORIES/MOOD_CATEGORIES oder aus
- * State.customItems.symptoms/moods (siehe symptomCatalog()/moodCatalog() in
- * 02-state-theme.js für die Label-Auflösung).
+ * Eine einzelne Erfassung eines Symptoms/einer Stimmung an einem Tag —
+ * MEHRERE Vorkommen desselben Katalog-Eintrags pro Tag sind erlaubt (z.B.
+ * Übelkeit dreimal am Tag), deshalb ist `id` eine eigene, pro Vorkommen
+ * eindeutige ID und NICHT identisch mit dem Katalog-Eintrag. `catalogId`
+ * referenziert einen Eintrag aus APP_DATA.SYMPTOM_CATEGORIES/MOOD_CATEGORIES
+ * oder aus State.customItems.symptoms/moods (siehe symptomCatalog()/
+ * moodCatalog() in 02-state-theme.js für die Label-Auflösung). Die Anzahl der
+ * Vorkommen mit gleicher catalogId an einem Tag ist der kleine Zähler-Badge
+ * auf dem jeweiligen Chip im Kalender-Sheet (siehe chipRowHTML(), 04-
+ * calendar.js).
  * @typedef {Object} TaggedItem
- * @property {string} id
+ * @property {string} id - pro Vorkommen eindeutig
+ * @property {string} catalogId - referenziert den Symptom-/Stimmungs-Katalog
  * @property {string|null} loggedAt - ISO-8601-Zeitstempel
  */
 

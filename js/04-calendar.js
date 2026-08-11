@@ -1,4 +1,4 @@
-import { addCustomMood, addCustomSymptom, addPainEntry, addPeriodEntry, deletePeriodEntry, emptyDayEntry, loadPeriods, removePainEntry, setDayNote, toggleMoodEntry, togglePainDayQuick, toggleSymptomEntry, updateMoodTime, updatePainEntry, updatePeriodEntry, updateSymptomTime } from './01-storage.js';
+import { addCustomMood, addCustomSymptom, addMoodOccurrence, addPainEntry, addPeriodEntry, addSymptomOccurrence, deletePeriodEntry, emptyDayEntry, loadPeriods, removeMoodOccurrence, removePainEntry, removeSymptomOccurrence, setDayNote, togglePainDayQuick, updateMoodOccurrenceTime, updatePainEntry, updatePeriodEntry, updateSymptomOccurrenceTime } from './01-storage.js';
 import { State, attachLongPress, moodCatalog, symptomCatalog } from './02-state-theme.js';
 import { addDays, computeCycleStats, daysBetween, escapeAttr, fmtTimeShort, formatISODate, getMonthLabel, isToday, parseISODate, shiftYearMonth, timeInputValue } from './03-utils.js';
 import { appLogoButtonHTML, bottomNavHTML, goCalendarHome, wireBottomNav } from './05-navigation.js';
@@ -339,26 +339,22 @@ function painSubformHTML(draft){
   `;
 }
 
-function chipRowHTML(catalog, selectedIds, dataAttr){
-  return catalog.map(item => `
-    <button type="button" class="chip${selectedIds.includes(item.id) ? ' is-selected' : ''}" data-${dataAttr}="${item.id}">${item.label}</button>
-  `).join('');
-}
-
-/** Kleiner, gedämpfter Hinweistext unter einer Chip-Reihe: listet für die
-    AKTUELL ausgewählten Symptome/Stimmungen, wann sie erfasst wurden — damit
-    sich (wie bei Schmerz-Einträgen) später nachvollziehen lässt, wann genau
-    etwas eingetreten ist. Nur einzelne Uhrzeit pro Item (loggedAt), kein
-    Verlauf über mehrfaches An-/Ausschalten hinweg. */
-function selectedItemsTimeHTML(catalog, selectedItems){
-  if (!selectedItems.length) return '';
-  const parts = selectedItems.map(sel => {
-    const item = catalog.find(c => c.id === sel.id);
-    const label = item ? item.label : sel.id;
-    const time = fmtTimeShort(sel.loggedAt);
-    return time ? `${label} ${time}` : label;
-  });
-  return `<p class="day-sheet-time-hint">Erfasst: ${parts.join(', ')}</p>`;
+/** Ein Chip pro Katalog-Eintrag, mit einem kleinen Zähler-Badge oben rechts,
+    sobald mindestens ein Vorkommen heute existiert — MEHRFACHES Tippen auf
+    denselben Chip ist bewusst möglich (z.B. Übelkeit dreimal am Tag), der
+    Chip zeigt dafür KEINEN starken "ausgewählt"-Zustand (dark-filled) mehr,
+    sondern nur einen dezenten Rahmen ("blasses Feld"), da er nicht mehr an/
+    aus, sondern ein Zähler ist. occurrences: das volle Symptom-/Stimmungs-
+    Array des Tages (TaggedItem[]), gruppiert hier nach catalogId. */
+function chipRowHTML(catalog, occurrences, dataAttr){
+  const counts = {};
+  occurrences.forEach(o => { counts[o.catalogId] = (counts[o.catalogId] || 0) + 1; });
+  return catalog.map(item => {
+    const count = counts[item.id] || 0;
+    const trackedClass = count > 0 ? ' is-tracked' : '';
+    const badge = count > 0 ? `<span class="chip-count-badge">${count}</span>` : '';
+    return `<button type="button" class="chip${trackedClass}" data-${dataAttr}="${item.id}">${item.label}${badge}</button>`;
+  }).join('');
 }
 
 // Laufender Entwurf für einen neuen Schmerz-Eintrag im offenen Sheet (null =
@@ -374,27 +370,33 @@ let daySheetISO = null;
 // beim Verlassen des Feldes (onblur) wird tatsächlich gespeichert.
 let dayNoteDraft = '';
 
-// Ziel eines gerade offenen Zeit-Editors für ein Symptom/eine Stimmung
-// (langer Druck auf einen bereits ausgewählten Chip, siehe
-// attachLongPress()-Wiring in wireDaySheetBody()) — { kind: 'symptom'|'mood',
-// id } oder null. Erlaubt, die automatisch erfasste Uhrzeit nachträglich
-// manuell zu korrigieren. Schmerz-Einträge haben ein eigenes, volles
-// Bearbeiten-Formular (painDraft.editId, siehe painSubformHTML() oben) statt
-// dieses reinen Zeit-Editors, da sie mehr Felder als nur die Uhrzeit haben.
-let timeEditTarget = null;
+// Für welchen Symptom-/Stimmungs-Katalog-Eintrag gerade die Liste seiner
+// heutigen Vorkommen zum Bearbeiten/Entfernen offen ist (langer Druck auf
+// einen bereits getrackten Chip, siehe attachLongPress()-Wiring in
+// wireDaySheetBody()) — { kind: 'symptom'|'mood', catalogId } oder null.
+// Schmerz-Einträge haben ein eigenes, volles Bearbeiten-Formular
+// (painDraft.editId, siehe painSubformHTML() oben) statt dieser Liste, da sie
+// weitere Felder als nur die Uhrzeit haben.
+let occurrenceEditTarget = null;
 
-/** Inline-Editor zum manuellen Setzen der Uhrzeit eines bereits ausgewählten
-    Symptoms/einer Stimmung — erscheint nach langem Druck auf den jeweiligen
-    Chip (siehe wireDaySheetBody()). Nutzt dieselbe Optik wie das
-    Schmerz-Unterformular (.pain-subform). */
-function timeEditorHTML(label, currentTimeValue){
+/** Inline-Liste aller heutigen Vorkommen EINES Symptoms/einer Stimmung, je
+    Zeile mit Uhrzeit (bearbeitbar) und ×-Button zum Entfernen — erscheint
+    nach langem Druck auf einen bereits getrackten Chip (siehe
+    wireDaySheetBody()). Nutzt dieselbe Optik wie das Schmerz-Unterformular
+    (.pain-subform). */
+function occurrenceEditorHTML(label, occurrences){
+  const rows = occurrences.map(o => `
+    <div class="occurrence-row" data-entry-id="${o.id}">
+      <input type="time" class="chip-add-input occurrence-time-input" data-entry-id="${o.id}" value="${timeInputValue(o.loggedAt)}">
+      <button type="button" class="pain-entry-remove" data-remove-occurrence-id="${o.id}" aria-label="Entfernen">×</button>
+    </div>
+  `).join('');
   return `
-    <div class="pain-subform" id="timeEditor">
-      <p class="pain-subform-label">Uhrzeit für „${label}“</p>
-      <input type="time" class="chip-add-input" id="timeEditorInput" value="${currentTimeValue}">
+    <div class="pain-subform" id="occurrenceEditor">
+      <p class="pain-subform-label">${label} — ${occurrences.length}x erfasst</p>
+      <div class="occurrence-list">${rows}</div>
       <div class="pain-subform-actions">
-        <button type="button" class="pain-sheet-btn pain-sheet-btn--secondary" id="timeEditorCancelBtn">Abbrechen</button>
-        <button type="button" class="pain-sheet-btn" id="timeEditorSaveBtn">Speichern</button>
+        <button type="button" class="pain-sheet-btn" id="occurrenceEditorCloseBtn">Fertig</button>
       </div>
     </div>
   `;
@@ -411,16 +413,16 @@ function daySheetBodyHTML(iso){
     ? painSubformHTML(painDraft)
     : '<button type="button" class="day-sheet-add-btn" id="addPainEntryBtn">+ Schmerz hinzufügen</button>';
 
-  const symptomEditItem = timeEditTarget && timeEditTarget.kind === 'symptom'
-    ? entry.symptoms.find(s => s.id === timeEditTarget.id) : null;
-  const symptomEditHTML = symptomEditItem
-    ? timeEditorHTML((symptomCatalog().find(c => c.id === symptomEditItem.id) || {}).label || symptomEditItem.id, timeInputValue(symptomEditItem.loggedAt))
+  const symptomOccurrences = occurrenceEditTarget && occurrenceEditTarget.kind === 'symptom'
+    ? entry.symptoms.filter(s => s.catalogId === occurrenceEditTarget.catalogId) : [];
+  const symptomEditHTML = symptomOccurrences.length
+    ? occurrenceEditorHTML((symptomCatalog().find(c => c.id === occurrenceEditTarget.catalogId) || {}).label || occurrenceEditTarget.catalogId, symptomOccurrences)
     : '';
 
-  const moodEditItem = timeEditTarget && timeEditTarget.kind === 'mood'
-    ? entry.moods.find(m => m.id === timeEditTarget.id) : null;
-  const moodEditHTML = moodEditItem
-    ? timeEditorHTML((moodCatalog().find(c => c.id === moodEditItem.id) || {}).label || moodEditItem.id, timeInputValue(moodEditItem.loggedAt))
+  const moodOccurrences = occurrenceEditTarget && occurrenceEditTarget.kind === 'mood'
+    ? entry.moods.filter(m => m.catalogId === occurrenceEditTarget.catalogId) : [];
+  const moodEditHTML = moodOccurrences.length
+    ? occurrenceEditorHTML((moodCatalog().find(c => c.id === occurrenceEditTarget.catalogId) || {}).label || occurrenceEditTarget.catalogId, moodOccurrences)
     : '';
 
   return `
@@ -438,9 +440,8 @@ function daySheetBodyHTML(iso){
 
     <div class="day-sheet-section">
       <p class="day-sheet-section-title">Symptome</p>
-      <p class="day-sheet-hint">Zum Bearbeiten der Uhrzeit ein ausgewähltes Symptom lange gedrückt halten.</p>
-      <div class="chip-row" id="symptomChipRow">${chipRowHTML(symptomCatalog(), entry.symptoms.map(s => s.id), 'symptom')}</div>
-      ${selectedItemsTimeHTML(symptomCatalog(), entry.symptoms)}
+      <p class="day-sheet-hint">Tippen trackt erneut (Zähler steigt) — zum Bearbeiten/Entfernen einzelner Zeitpunkte lange gedrückt halten.</p>
+      <div class="chip-row" id="symptomChipRow">${chipRowHTML(symptomCatalog(), entry.symptoms, 'symptom')}</div>
       ${symptomEditHTML}
       <div class="chip-add-row">
         <input type="text" class="chip-add-input" id="symptomCustomInput" placeholder="Eigenes Symptom …">
@@ -450,9 +451,8 @@ function daySheetBodyHTML(iso){
 
     <div class="day-sheet-section">
       <p class="day-sheet-section-title">Stimmung</p>
-      <p class="day-sheet-hint">Zum Bearbeiten der Uhrzeit eine ausgewählte Stimmung lange gedrückt halten.</p>
-      <div class="chip-row" id="moodChipRow">${chipRowHTML(moodCatalog(), entry.moods.map(m => m.id), 'mood')}</div>
-      ${selectedItemsTimeHTML(moodCatalog(), entry.moods)}
+      <p class="day-sheet-hint">Tippen trackt erneut (Zähler steigt) — zum Bearbeiten/Entfernen einzelner Zeitpunkte lange gedrückt halten.</p>
+      <div class="chip-row" id="moodChipRow">${chipRowHTML(moodCatalog(), entry.moods, 'mood')}</div>
       ${moodEditHTML}
       <div class="chip-add-row">
         <input type="text" class="chip-add-input" id="moodCustomInput" placeholder="Eigene Stimmung …">
@@ -550,48 +550,65 @@ function wireDaySheetBody(){
   });
 
   document.querySelectorAll('#symptomChipRow .chip').forEach(chip => {
+    // Tippen fügt IMMER ein neues Vorkommen hinzu (kein Toggle mehr) — der
+    // Zähler-Badge auf dem Chip steigt entsprechend, mehrfaches Tracken am
+    // selben Tag ist bewusst möglich (z.B. Übelkeit dreimal am Tag).
     chip.onclick = () => {
-      State.dayLogs = new Map(toggleSymptomEntry(daySheetISO, chip.dataset.symptom).map(e => [e.date, e]));
+      State.dayLogs = new Map(addSymptomOccurrence(daySheetISO, chip.dataset.symptom).map(e => [e.date, e]));
       renderDaySheetContent();
     };
-    // Langer Druck öffnet den Zeit-Editor NUR für ein bereits ausgewähltes
-    // Symptom (sonst gäbe es noch keine Uhrzeit zu bearbeiten) — ein nicht
-    // ausgewähltes Symptom reagiert auf langen Druck genauso wie auf einen
-    // normalen Tap (schaltet es an).
+    // Langer Druck öffnet die Liste aller heutigen Vorkommen zum Bearbeiten/
+    // Entfernen (occurrenceEditorHTML() oben) — NUR wenn schon mindestens
+    // eines existiert.
     attachLongPress(chip, () => {
       const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
-      if (!entry.symptoms.some(s => s.id === chip.dataset.symptom)) return;
-      timeEditTarget = { kind: 'symptom', id: chip.dataset.symptom };
+      if (!entry.symptoms.some(s => s.catalogId === chip.dataset.symptom)) return;
+      occurrenceEditTarget = { kind: 'symptom', catalogId: chip.dataset.symptom };
       renderDaySheetContent();
     });
   });
   document.querySelectorAll('#moodChipRow .chip').forEach(chip => {
     chip.onclick = () => {
-      State.dayLogs = new Map(toggleMoodEntry(daySheetISO, chip.dataset.mood).map(e => [e.date, e]));
+      State.dayLogs = new Map(addMoodOccurrence(daySheetISO, chip.dataset.mood).map(e => [e.date, e]));
       renderDaySheetContent();
     };
     attachLongPress(chip, () => {
       const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
-      if (!entry.moods.some(m => m.id === chip.dataset.mood)) return;
-      timeEditTarget = { kind: 'mood', id: chip.dataset.mood };
+      if (!entry.moods.some(m => m.catalogId === chip.dataset.mood)) return;
+      occurrenceEditTarget = { kind: 'mood', catalogId: chip.dataset.mood };
       renderDaySheetContent();
     });
   });
 
-  const timeEditorInput = document.getElementById('timeEditorInput');
-  const timeEditorCancelBtn = document.getElementById('timeEditorCancelBtn');
-  if (timeEditorCancelBtn) timeEditorCancelBtn.onclick = () => { timeEditTarget = null; renderDaySheetContent(); };
-  const timeEditorSaveBtn = document.getElementById('timeEditorSaveBtn');
-  if (timeEditorSaveBtn) timeEditorSaveBtn.onclick = () => {
-    const value = timeEditorInput.value;
-    if (!value) return;
-    const updated = timeEditTarget.kind === 'symptom'
-      ? updateSymptomTime(daySheetISO, timeEditTarget.id, value)
-      : updateMoodTime(daySheetISO, timeEditTarget.id, value);
-    State.dayLogs = new Map(updated.map(e => [e.date, e]));
-    timeEditTarget = null;
-    renderDaySheetContent();
-  };
+  const occurrenceEditorCloseBtn = document.getElementById('occurrenceEditorCloseBtn');
+  if (occurrenceEditorCloseBtn) occurrenceEditorCloseBtn.onclick = () => { occurrenceEditTarget = null; renderDaySheetContent(); };
+
+  document.querySelectorAll('.occurrence-time-input').forEach(input => {
+    input.onchange = () => {
+      const updated = occurrenceEditTarget.kind === 'symptom'
+        ? updateSymptomOccurrenceTime(daySheetISO, input.dataset.entryId, input.value)
+        : updateMoodOccurrenceTime(daySheetISO, input.dataset.entryId, input.value);
+      State.dayLogs = new Map(updated.map(e => [e.date, e]));
+      renderDaySheetContent();
+    };
+  });
+  document.querySelectorAll('[data-remove-occurrence-id]').forEach(btn => {
+    btn.onclick = () => {
+      const updated = occurrenceEditTarget.kind === 'symptom'
+        ? removeSymptomOccurrence(daySheetISO, btn.dataset.removeOccurrenceId)
+        : removeMoodOccurrence(daySheetISO, btn.dataset.removeOccurrenceId);
+      State.dayLogs = new Map(updated.map(e => [e.date, e]));
+      // Waren das gerade die letzten Vorkommen dieses Katalog-Eintrags,
+      // schließt sich der Editor automatisch (statt eine leere "0x erfasst"-
+      // Box stehen zu lassen).
+      const entry = State.dayLogs.get(daySheetISO) || emptyDayEntry(daySheetISO);
+      const remaining = occurrenceEditTarget.kind === 'symptom'
+        ? entry.symptoms.filter(s => s.catalogId === occurrenceEditTarget.catalogId)
+        : entry.moods.filter(m => m.catalogId === occurrenceEditTarget.catalogId);
+      if (!remaining.length) occurrenceEditTarget = null;
+      renderDaySheetContent();
+    };
+  });
 
   const addSymptomBtn = document.getElementById('symptomCustomAddBtn');
   const symptomInput = document.getElementById('symptomCustomInput');
@@ -600,7 +617,7 @@ function wireDaySheetBody(){
     if (!label) return;
     const { customItems, item } = addCustomSymptom(label);
     State.customItems = customItems;
-    State.dayLogs = new Map(toggleSymptomEntry(daySheetISO, item.id).map(e => [e.date, e]));
+    State.dayLogs = new Map(addSymptomOccurrence(daySheetISO, item.id).map(e => [e.date, e]));
     renderDaySheetContent();
   };
 
@@ -611,7 +628,7 @@ function wireDaySheetBody(){
     if (!label) return;
     const { customItems, item } = addCustomMood(label);
     State.customItems = customItems;
-    State.dayLogs = new Map(toggleMoodEntry(daySheetISO, item.id).map(e => [e.date, e]));
+    State.dayLogs = new Map(addMoodOccurrence(daySheetISO, item.id).map(e => [e.date, e]));
     renderDaySheetContent();
   };
 }
@@ -628,7 +645,7 @@ function openDayDetailSheet(iso){
   closeDaySheet();
   daySheetISO = iso;
   painDraft = null;
-  timeEditTarget = null;
+  occurrenceEditTarget = null;
   dayNoteDraft = (State.dayLogs.get(iso) || {}).note || '';
   const date = parseISODate(iso);
 
@@ -666,7 +683,7 @@ function closeDaySheet(){
   if (backdrop) backdrop.remove();
   daySheetISO = null;
   painDraft = null;
-  timeEditTarget = null;
+  occurrenceEditTarget = null;
   dayNoteDraft = '';
 }
 

@@ -104,15 +104,22 @@ function nowStamp(){
 /** Bringt eine geladene/migrierte Tages-Log-Liste in die aktuelle, vollständige
     Form: jeder Schmerz-Eintrag bekommt garantiert `note`/`loggedAt` (fehlen bei
     älteren, bereits migrierten Installationen), jeder Symptom-/Stimmungs-
-    Eintrag wird von einer reinen ID (Vorversion ohne Zeiterfassung) zu einem
-    { id, loggedAt }-Objekt normalisiert, und jeder Tag bekommt garantiert ein
-    `note`-Feld (freie Text-Notiz für den GANZEN Tag, unabhängig von der
-    Schmerz-Notiz — siehe setDayNote() unten). Macht loadDayLogs() unabhängig
-    davon, aus welcher App-Version die gespeicherten Daten stammen. */
+    Eintrag wird in das aktuelle { id, catalogId, loggedAt }-Format überführt
+    (deckt sowohl die ganz alte reine-ID-Version als auch die Zwischenversion
+    ohne Mehrfach-Erfassung ab, wo `id` gleichzeitig die Katalog-Referenz war),
+    und jeder Tag bekommt garantiert ein `note`-Feld (freie Text-Notiz für den
+    GANZEN Tag, unabhängig von der Schmerz-Notiz — siehe setDayNote() unten).
+    Macht loadDayLogs() unabhängig davon, aus welcher App-Version die
+    gespeicherten Daten stammen. */
 function normalizeDayLogs(dayLogs){
-  const normalizeTagged = (list) => (list || []).map(item =>
-    typeof item === 'string' ? { id: item, loggedAt: null } : { id: item.id, loggedAt: item.loggedAt ?? null }
-  );
+  const normalizeTagged = (list) => (list || []).map(item => {
+    if (typeof item === 'string') return { id: generateEntryId('t'), catalogId: item, loggedAt: null };
+    if (item.catalogId !== undefined) return { id: item.id || generateEntryId('t'), catalogId: item.catalogId, loggedAt: item.loggedAt ?? null };
+    // Zwischenversion ohne Mehrfach-Erfassung: `id` war gleichzeitig die
+    // Katalog-Referenz (max. ein Vorkommen pro Tag) — als eigenständiges
+    // Vorkommen mit frischer eindeutiger id übernehmen.
+    return { id: generateEntryId('t'), catalogId: item.id, loggedAt: item.loggedAt ?? null };
+  });
   return dayLogs.map(entry => ({
     date: entry.date,
     note: entry.note ?? null,
@@ -282,30 +289,60 @@ export function removePainEntry(iso, entryId){
   });
 }
 
-/** Schaltet ein einzelnes Symptom für einen Tag an/aus (Mehrfachauswahl-
-    Chips). Beim Anschalten wird die aktuelle Uhrzeit als loggedAt vermerkt;
-    beim Ausschalten geht sie mit dem Eintrag verloren (bei erneutem Anschalten
-    wird ein neuer Zeitpunkt gesetzt) — entspricht dem Tap-Verhalten der Chips.
+/** Fügt EIN neues Vorkommen eines Symptoms für den Tag hinzu — bewusst KEIN
+    Toggle mehr: mehrfaches Tippen auf denselben Chip trackt mehrfach (z.B.
+    Übelkeit dreimal am Tag), der kleine Zähler-Badge auf dem Chip zeigt die
+    Anzahl (siehe chipRowHTML(), 04-calendar.js). Zum Entfernen/Bearbeiten
+    einzelner Vorkommen siehe removeSymptomOccurrence()/
+    updateSymptomOccurrenceTime() unten (langer Druck auf den Chip).
     @param {string} iso
-    @param {string} symptomId
+    @param {string} catalogId
     @returns {DayLog[]} */
-export function toggleSymptomEntry(iso, symptomId){
+export function addSymptomOccurrence(iso, catalogId){
   return upsertDayEntry(iso, entry => {
-    const idx = entry.symptoms.findIndex(s => s.id === symptomId);
-    if (idx !== -1) entry.symptoms.splice(idx, 1);
-    else entry.symptoms.push({ id: symptomId, loggedAt: nowStamp() });
+    entry.symptoms.push({ id: generateEntryId('sy'), catalogId, loggedAt: nowStamp() });
   });
 }
 
-/** Wie toggleSymptomEntry(), nur für Stimmungs-Chips.
-    @param {string} iso
-    @param {string} moodId
+/** @param {string} iso
+    @param {string} entryId - die EINDEUTIGE Vorkommen-id (TaggedItem.id), NICHT die catalogId
     @returns {DayLog[]} */
-export function toggleMoodEntry(iso, moodId){
+export function removeSymptomOccurrence(iso, entryId){
   return upsertDayEntry(iso, entry => {
-    const idx = entry.moods.findIndex(m => m.id === moodId);
-    if (idx !== -1) entry.moods.splice(idx, 1);
-    else entry.moods.push({ id: moodId, loggedAt: nowStamp() });
+    entry.symptoms = entry.symptoms.filter(s => s.id !== entryId);
+  });
+}
+
+/** @param {string} iso @param {string} entryId @param {string} hhmm @returns {DayLog[]} */
+export function updateSymptomOccurrenceTime(iso, entryId, hhmm){
+  return upsertDayEntry(iso, entry => {
+    const item = entry.symptoms.find(s => s.id === entryId);
+    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
+  });
+}
+
+/** Wie addSymptomOccurrence(), nur für Stimmungs-Chips.
+    @param {string} iso
+    @param {string} catalogId
+    @returns {DayLog[]} */
+export function addMoodOccurrence(iso, catalogId){
+  return upsertDayEntry(iso, entry => {
+    entry.moods.push({ id: generateEntryId('mo'), catalogId, loggedAt: nowStamp() });
+  });
+}
+
+/** @param {string} iso @param {string} entryId @returns {DayLog[]} */
+export function removeMoodOccurrence(iso, entryId){
+  return upsertDayEntry(iso, entry => {
+    entry.moods = entry.moods.filter(m => m.id !== entryId);
+  });
+}
+
+/** @param {string} iso @param {string} entryId @param {string} hhmm @returns {DayLog[]} */
+export function updateMoodOccurrenceTime(iso, entryId, hhmm){
+  return upsertDayEntry(iso, entry => {
+    const item = entry.moods.find(m => m.id === entryId);
+    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
   });
 }
 
@@ -343,38 +380,12 @@ export function updatePainEntry(iso, entryId, { category, intensity, timeOfDay, 
   });
 }
 
-/** Wie updatePainEntry(), aber nur für die Uhrzeit eines bereits
-    ausgewählten Symptoms (Symptome haben sonst keine weiteren Felder zum
-    Bearbeiten — nur an/aus + Zeitpunkt).
-    @param {string} iso
-    @param {string} symptomId
-    @param {string} hhmm
-    @returns {DayLog[]} */
-export function updateSymptomTime(iso, symptomId, hhmm){
-  return upsertDayEntry(iso, entry => {
-    const item = entry.symptoms.find(s => s.id === symptomId);
-    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
-  });
-}
-
 /** Setzt/löscht die freie Tages-Notiz (unabhängig von der Schmerz-Notiz bei
     Kategorie "Sonstige") — z.B. für "war krank", "Geburtstag gefeiert" o.ä.
     Leerer/nur-Leerzeichen-Text entfernt die Notiz wieder (null). */
 export function setDayNote(iso, text){
   const trimmed = (text || '').trim();
   return upsertDayEntry(iso, entry => { entry.note = trimmed || null; });
-}
-
-/** Wie updateSymptomTime(), für eine bereits ausgewählte Stimmung.
-    @param {string} iso
-    @param {string} moodId
-    @param {string} hhmm
-    @returns {DayLog[]} */
-export function updateMoodTime(iso, moodId, hhmm){
-  return upsertDayEntry(iso, entry => {
-    const item = entry.moods.find(m => m.id === moodId);
-    if (item) item.loggedAt = stampFromDateAndTime(iso, hhmm);
-  });
 }
 
 /** Nutzerdefinierte, zusätzliche Symptom-/Stimmungs-Chips (Detailgrad
@@ -447,17 +458,18 @@ export function renameCustomItem(field, id, newLabel){
 /** Entfernt einen eigenen Symptom-/Stimmungs-Chip komplett — anders als beim
     Umbenennen reicht eine Änderung am Katalog hier NICHT: die id würde sonst
     in bereits erfassten Tagen als "Geister"-Eintrag ohne auflösbares Label
-    hängen bleiben. Deshalb wird die id zusätzlich aus JEDEM Tages-Log entfernt
-    (löscht die Vergangenheit dieses Chips mit, statt sie nur unsichtbar zu
-    machen — bewusste Entscheidung, da ein gelöschter eigener Chip i.d.R. ein
-    Tippfehler oder Fehlversuch war und nicht rückwirkend Sinn ergibt). */
+    hängen bleiben. Deshalb werden ALLE Vorkommen mit dieser catalogId
+    zusätzlich aus JEDEM Tages-Log entfernt (löscht die Vergangenheit dieses
+    Chips mit, statt sie nur unsichtbar zu machen — bewusste Entscheidung, da
+    ein gelöschter eigener Chip i.d.R. ein Tippfehler oder Fehlversuch war und
+    nicht rückwirkend Sinn ergibt). */
 export function deleteCustomItem(field, id){
   const customItems = loadCustomItems();
   customItems[field] = customItems[field].filter(i => i.id !== id);
   saveCustomItems(customItems);
 
   const dayLogs = loadDayLogs()
-    .map(entry => ({ ...entry, [field]: entry[field].filter(i => i.id !== id) }))
+    .map(entry => ({ ...entry, [field]: entry[field].filter(i => i.catalogId !== id) }))
     // Dieselbe Leer-Regel wie in upsertDayEntry(): ein Tag ohne jegliche Daten
     // wird nicht als toter Datensatz behalten, nur weil hier direkt am Array
     // statt über upsertDayEntry() gearbeitet wird.

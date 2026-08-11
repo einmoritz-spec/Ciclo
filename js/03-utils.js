@@ -582,14 +582,15 @@ export function computePainStats(periods, dayLogsArray){
   return { entries, totalCount: entries.length, avgIntensity, byTimeOfDay };
 }
 
-/** Zählt, wie oft jede Symptom-/Stimmungs-ID über alle Tages-Logs hinweg
-    vorkommt (id -> Anzahl Tage). field: 'symptoms' | 'moods'. Einträge sind
-    { id, loggedAt }-Objekte (siehe toggleSymptomEntry()/toggleMoodEntry() in
-    01-storage.js), nur die id fließt in die Zählung ein. */
+/** Zählt, wie oft jede Symptom-/Stimmungs-catalogId über alle Tages-Logs
+    hinweg vorkommt (catalogId -> Anzahl Vorkommen). Da mehrere Vorkommen pro
+    Tag erlaubt sind (siehe addSymptomOccurrence()/addMoodOccurrence() in
+    01-storage.js), zählt dies die GESAMTE Häufigkeit, nicht nur "an wie
+    vielen Tagen". field: 'symptoms' | 'moods'. */
 export function computeItemFrequency(dayLogsArray, field){
   const counts = {};
   dayLogsArray.forEach(day => {
-    (day[field] || []).forEach(item => { counts[item.id] = (counts[item.id] || 0) + 1; });
+    (day[field] || []).forEach(item => { counts[item.catalogId] = (counts[item.catalogId] || 0) + 1; });
   });
   return counts;
 }
