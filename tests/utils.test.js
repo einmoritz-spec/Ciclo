@@ -5,7 +5,8 @@ import {
   computeCycleStats, classifyPhaseForDate, computeLinearTrend,
   computeLeadTimeInsight, computePhaseOccurrenceStats, computePainStats,
   computeItemFrequency, topItemsFromCounts, flattenFieldOccurrences,
-  computeChartData, hexToHsl, hslToHex, hexToRgb, rgbToHex, generateEarthyTheme,
+  computeChartData, computeTimeOfDayMatrix, computePeakWindow,
+  hexToHsl, hslToHex, hexToRgb, rgbToHex, generateEarthyTheme,
   escapeAttr, fmtTimeShort
 } from '../js/03-utils.js';
 
@@ -309,5 +310,99 @@ describe('Kleinere Formatierungs-Helfer', () => {
   it('fmtTimeShort liefert null ohne Zeitstempel', () => {
     expect(fmtTimeShort(null)).toBeNull();
     expect(fmtTimeShort(undefined)).toBeNull();
+  });
+});
+
+describe('Tagesverlauf-Auswertung', () => {
+  /** Baut einen ISO-Zeitstempel fuer einen festen Tag zur gegebenen Stunde. */
+  const at = (hour) => new Date(2026, 0, 5, hour, 0, 0).toISOString();
+
+  const symptomCat = [{ id: 'uebelkeit', label: 'Übelkeit' }, { id: 'muedigkeit', label: 'Müdigkeit' }];
+  const moodCat = [{ id: 'reizbar', label: 'Reizbar' }];
+
+  it('ordnet Einträge der richtigen Stunde zu und zählt sie je Kategorie', () => {
+    const dayLogs = [{
+      date: '2026-01-05', note: null,
+      pain: [{ id: 'p1', category: 'kopf', intensity: 5, timeOfDay: null, note: null, loggedAt: at(9) }],
+      symptoms: [
+        { id: 's1', catalogId: 'uebelkeit', loggedAt: at(9) },
+        { id: 's2', catalogId: 'uebelkeit', loggedAt: at(9) },
+        { id: 's3', catalogId: 'uebelkeit', loggedAt: at(20) }
+      ],
+      moods: [{ id: 'm1', catalogId: 'reizbar', loggedAt: at(20) }]
+    }];
+    const matrix = computeTimeOfDayMatrix(dayLogs, symptomCat, moodCat);
+
+    const uebelkeit = matrix.rows.find(r => r.id === 'uebelkeit');
+    expect(uebelkeit.hours[9]).toBe(2);
+    expect(uebelkeit.hours[20]).toBe(1);
+    expect(uebelkeit.total).toBe(3);
+    expect(uebelkeit.kind).toBe('symptom');
+
+    expect(matrix.hourTotals[9]).toBe(3); // 2x Übelkeit + 1x Kopfschmerz
+    expect(matrix.hourTotals[20]).toBe(2);
+    expect(matrix.totalEntries).toBe(5);
+    expect(matrix.maxCell).toBe(2);
+  });
+
+  it('überspringt Einträge ohne Zeitstempel, statt sie auf 00:00 zu legen', () => {
+    const dayLogs = [{
+      date: '2026-01-05', note: null, pain: [],
+      symptoms: [
+        { id: 's1', catalogId: 'uebelkeit', loggedAt: null },
+        { id: 's2', catalogId: 'uebelkeit', loggedAt: at(14) }
+      ],
+      moods: []
+    }];
+    const matrix = computeTimeOfDayMatrix(dayLogs, symptomCat, moodCat);
+    expect(matrix.totalEntries).toBe(1);
+    expect(matrix.hourTotals[0]).toBe(0);
+    expect(matrix.hourTotals[14]).toBe(1);
+  });
+
+  it('sortiert Zeilen nach Gesamthäufigkeit absteigend', () => {
+    const dayLogs = [{
+      date: '2026-01-05', note: null, pain: [],
+      symptoms: [
+        { id: 's1', catalogId: 'muedigkeit', loggedAt: at(8) },
+        { id: 's2', catalogId: 'uebelkeit', loggedAt: at(8) },
+        { id: 's3', catalogId: 'uebelkeit', loggedAt: at(9) },
+        { id: 's4', catalogId: 'uebelkeit', loggedAt: at(10) }
+      ],
+      moods: []
+    }];
+    const matrix = computeTimeOfDayMatrix(dayLogs, symptomCat, moodCat);
+    expect(matrix.rows[0].id).toBe('uebelkeit');
+    expect(matrix.rows[1].id).toBe('muedigkeit');
+  });
+
+  it('liefert eine leere Auswertung, wenn gar keine Einträge vorliegen', () => {
+    const matrix = computeTimeOfDayMatrix([], symptomCat, moodCat);
+    expect(matrix.rows).toHaveLength(0);
+    expect(matrix.totalEntries).toBe(0);
+    expect(matrix.maxCell).toBe(0);
+  });
+
+  it('computePeakWindow findet den Schwerpunkt über ein 3-Stunden-Fenster', () => {
+    const hours = new Array(24).fill(0);
+    hours[8] = 3; hours[9] = 4; hours[10] = 3; // klarer Block um 9 Uhr
+    hours[15] = 5;                              // einzelne, höhere Stunde
+    const peak = computePeakWindow(hours);
+    // Das Fenster 8-10 (10 Einträge) schlägt die einzelne Stunde 15 (5) —
+    // genau das ist der Zweck der Fenster-Logik.
+    expect(peak.peakHour).toBe(9);
+    expect(peak.share).toBeCloseTo(10 / 15, 5);
+  });
+
+  it('computePeakWindow rechnet zyklisch über Mitternacht', () => {
+    const hours = new Array(24).fill(0);
+    hours[23] = 3; hours[0] = 4; hours[1] = 3;
+    const peak = computePeakWindow(hours);
+    expect(peak.peakHour).toBe(0);
+    expect(peak.share).toBe(1);
+  });
+
+  it('computePeakWindow liefert null ohne Einträge', () => {
+    expect(computePeakWindow(new Array(24).fill(0))).toBeNull();
   });
 });
