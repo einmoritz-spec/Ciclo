@@ -1,5 +1,5 @@
-import { State, isItemHidden, wireVisibilityLongPress } from './02-state-theme.js';
-import { average, computeChartData, computeLinearTrend, computePainStats, computePhaseOccurrenceStats, flattenFieldOccurrences, median, parseISODate } from './03-utils.js';
+import { State, isItemHidden, moodCatalog, symptomCatalog, wireVisibilityLongPress } from './02-state-theme.js';
+import { average, computeChartData, computeLinearTrend, computePainStats, computePeakWindow, computePhaseOccurrenceStats, computeTimeOfDayMatrix, flattenFieldOccurrences, median, parseISODate } from './03-utils.js';
 import { appLogoButtonHTML, bottomNavHTML, goCalendarHome, wireBottomNav } from './05-navigation.js';
 import { goSettings } from './09-settings.js';
 import { APP_DATA } from './data/app-data.js';
@@ -173,6 +173,166 @@ function cycleTrendDescription(slope){
   return `Deine Zykluslänge hat sich im Schnitt um ${fmtDaysAvg(Math.abs(slope))} Tage je Zyklus ${direction}.`;
 }
 
+/* ---------------------------------------------------
+   TAGESVERLAUF (Heatmap + 24-Stunden-Gesamtverteilung)
+   Zeigt, zu welcher Tageszeit welche Beschwerde auftritt. Datengrundlage:
+   computeTimeOfDayMatrix() (03-utils.js), gespeist aus den automatisch
+   erfassten Uhrzeiten jedes Eintrags.
+--------------------------------------------------- */
+
+/** Farbvariable je Eintragsart — dieselbe Zuordnung wie bei den Marker-Punkten
+    im Kalender (dayMarkersHTML(), 04-calendar.js), damit sich die Bedeutung
+    der Farben durch die ganze App zieht. */
+function kindColorVar(kind){
+  if (kind === 'pain') return '--color-pain';
+  if (kind === 'symptom') return '--color-accent';
+  return '--color-text-heading';
+}
+
+function kindLabel(kind){
+  if (kind === 'pain') return 'Schmerz';
+  if (kind === 'symptom') return 'Symptom';
+  return 'Stimmung';
+}
+
+/** 'HH' -> '07 Uhr'-artige Kurzform fuer Achsen/Fliesstext. */
+export function fmtHour(h){
+  return String(h).padStart(2, '0') + ' Uhr';
+}
+
+/** Flaechendiagramm ueber 24 Stunden: wie viele Eintraege insgesamt fallen in
+    welche Stunde. Sitzt als "Ueberblick" ueber der Heatmap — beantwortet die
+    Frage "wann ist ueberhaupt am meisten los?", bevor es kategorienweise ins
+    Detail geht. Bewusst mit weichem Farbverlauf und ohne Gitternetz, damit es
+    ruhig wirkt und die Heatmap darunter der eigentliche Blickfang bleibt. */
+export function hourlyAreaSVG(hourTotals){
+  const width = 24 * 26;
+  const height = 96;
+  const paddingTop = 18;
+  const paddingBottom = 22;
+  const chartHeight = height - paddingTop - paddingBottom;
+  const max = Math.max(...hourTotals, 1);
+  const stepX = width / 23;
+
+  const xFor = h => h * stepX;
+  const yFor = v => paddingTop + chartHeight - (v / max) * chartHeight;
+
+  const points = hourTotals.map((v, h) => ({ x: xFor(h), y: yFor(v), v, h }));
+  // Glatte Kurve durch kubische Beziers zwischen den Stundenpunkten — wirkt
+  // deutlich hochwertiger als ein Zickzack-Polygonzug bei 24 Stuetzstellen.
+  let path = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 0; i < points.length - 1; i++){
+    const p0 = points[i];
+    const p1 = points[i + 1];
+    const cx = (p0.x + p1.x) / 2;
+    path += ` C ${cx} ${p0.y}, ${cx} ${p1.y}, ${p1.x} ${p1.y}`;
+  }
+  const baseline = paddingTop + chartHeight;
+  const areaPath = `${path} L ${points[points.length - 1].x} ${baseline} L ${points[0].x} ${baseline} Z`;
+  const gradId = 'hourGrad' + Math.random().toString(36).slice(2, 8);
+
+  // Nur alle 6 Stunden beschriften — 24 Labels waeren auf Handy-Breite Matsch.
+  const axisLabels = [0, 6, 12, 18].map(h =>
+    `<text x="${xFor(h)}" y="${height - 6}" text-anchor="middle" class="chart-axis-label">${String(h).padStart(2, '0')}</text>`
+  ).join('');
+
+  const peakHour = hourTotals.indexOf(max);
+  const peakMarker = `<circle cx="${xFor(peakHour)}" cy="${yFor(max)}" r="3.5" style="fill:var(--color-accent)"></circle>`;
+
+  return `
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+      <defs>
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" style="stop-color:var(--color-accent);stop-opacity:0.30"></stop>
+          <stop offset="100%" style="stop-color:var(--color-accent);stop-opacity:0"></stop>
+        </linearGradient>
+      </defs>
+      <path d="${areaPath}" fill="url(#${gradId})" stroke="none"></path>
+      <path d="${path}" fill="none" style="stroke:var(--color-accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+      ${peakMarker}
+      ${axisLabels}
+    </svg>
+  `;
+}
+
+/** Die eigentliche Heatmap: eine Zeile je Kategorie, 24 Zellen je Zeile.
+    Zell-Deckkraft skaliert mit der Haeufigkeit (relativ zum staerksten Wert
+    ueber ALLE Zeilen, damit Zeilen untereinander vergleichbar bleiben statt
+    jede fuer sich normalisiert zu sein). Leere Stunden bekommen eine sehr
+    blasse Grundflaeche statt gar nichts, damit das Raster als Raster lesbar
+    bleibt. Labels stehen links ausserhalb des scrollbaren Bereichs. */
+export function timeOfDayHeatmapSVG(matrix){
+  const cell = 22;
+  const gap = 3;
+  const rowHeight = cell + gap;
+  const labelWidth = 116;
+  const paddingTop = 20;
+  const paddingBottom = 20;
+  const gridWidth = 24 * (cell + gap);
+  const width = labelWidth + gridWidth;
+  const height = paddingTop + matrix.rows.length * rowHeight + paddingBottom;
+
+  const hourHeaders = [0, 6, 12, 18].map(h =>
+    `<text x="${labelWidth + h * (cell + gap) + cell / 2}" y="13" text-anchor="middle" class="chart-axis-label">${String(h).padStart(2, '0')}</text>`
+  ).join('');
+
+  const rowsHTML = matrix.rows.map((row, i) => {
+    const y = paddingTop + i * rowHeight;
+    const colorVar = kindColorVar(row.kind);
+    const cells = row.hours.map((count, h) => {
+      const x = labelWidth + h * (cell + gap);
+      const opacity = count === 0 ? 0.06 : 0.20 + (count / matrix.maxCell) * 0.80;
+      const title = count > 0 ? `<title>${row.label}, ${fmtHour(h)}: ${count}x</title>` : '';
+      return `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="5" style="fill:var(${colorVar});opacity:${opacity.toFixed(2)}">${title}</rect>`;
+    }).join('');
+    return `
+      <text x="0" y="${y + cell / 2 + 4}" class="heatmap-row-label">${row.label}</text>
+      <text x="${labelWidth - 10}" y="${y + cell / 2 + 4}" text-anchor="end" class="heatmap-row-total">${row.total}</text>
+      ${cells}
+    `;
+  }).join('');
+
+  return `
+    <svg class="chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+      ${hourHeaders}
+      ${rowsHTML}
+    </svg>
+  `;
+}
+
+/** Kurze, automatisch formulierte Einordnung unter der Heatmap: nennt die
+    zwei am staerksten an eine Tageszeit gebundenen Kategorien. Nur Zeilen mit
+    mindestens 3 Eintraegen UND einer erkennbaren Buendelung (>= 50% im
+    3-Stunden-Fenster) werden erwaehnt — sonst waere die Aussage Zufall. */
+function timeOfDayInsightHTML(matrix){
+  const candidates = matrix.rows
+    .filter(r => r.total >= 3)
+    .map(r => ({ row: r, peak: computePeakWindow(r.hours) }))
+    .filter(c => c.peak && c.peak.share >= 0.5)
+    .sort((a, b) => b.peak.share - a.peak.share)
+    .slice(0, 2);
+
+  if (!candidates.length) return '';
+  const parts = candidates.map(c =>
+    `<strong>${c.row.label}</strong> meist gegen ${fmtHour(c.peak.peakHour)}`
+  );
+  return `<p class="chart-card-insight">${parts.join(' · ')}</p>`;
+}
+
+/** Legende fuer die drei Eintragsarten (Farbcodierung der Heatmap-Zeilen). */
+function heatmapLegendHTML(matrix){
+  const kinds = ['pain', 'symptom', 'mood'].filter(k => matrix.rows.some(r => r.kind === k));
+  return `
+    <div class="heatmap-legend">
+      ${kinds.map(k => `
+        <span class="heatmap-legend-item">
+          <span class="heatmap-legend-dot" style="background:var(${kindColorVar(k)})"></span>${kindLabel(k)}
+        </span>
+      `).join('')}
+    </div>
+  `;
+}
+
 function chartCardHTML(id, title, subtitle, bodyHTML, avgLabel){
   if (isItemHidden(id)) return '';
   return `
@@ -314,7 +474,45 @@ function chartBodyHTML(){
     `;
   }
 
-  return `<div class="chart-view-scroll">${periodCard}${cycleCard}${cycleTrendCard}${painPhaseCard}${painTimeCard}${symptomsPhaseCard}${moodsPhaseCard}</div>`;
+  // Tagesverlauf: nutzt die automatisch erfassten Uhrzeiten aller Einträge
+  // (Schmerz + Symptome + Stimmung zusammen), siehe computeTimeOfDayMatrix()
+  // in 03-utils.js. Erscheint nur, wenn überhaupt Einträge MIT Uhrzeit
+  // vorliegen — sehr alte, migrierte Einträge ohne Zeitstempel zählen hier
+  // nicht mit, sonst wäre die Verteilung verfälscht.
+  const todMatrix = computeTimeOfDayMatrix(dayLogsArray, symptomCatalog(), moodCatalog());
+
+  let hourlyCard = '';
+  if (todMatrix.totalEntries && !isItemHidden('chart-hourlyTotals')){
+    const peakHour = todMatrix.hourTotals.indexOf(Math.max(...todMatrix.hourTotals));
+    hourlyCard = `
+      <div class="chart-card" data-vis-id="chart-hourlyTotals">
+        <div class="chart-card-header">
+          <span class="chart-card-title">Tagesverlauf</span>
+          <span class="chart-card-avg">${todMatrix.totalEntries} Einträge</span>
+        </div>
+        <p class="chart-card-subtitle">Wann über den Tag verteilt du Beschwerden erfasst hast</p>
+        <p class="chart-card-insight">Schwerpunkt gegen ${fmtHour(peakHour)}</p>
+        <div class="chart-scroll-x">${hourlyAreaSVG(todMatrix.hourTotals)}</div>
+      </div>
+    `;
+  }
+
+  let heatmapCard = '';
+  if (todMatrix.rows.length && !isItemHidden('chart-timeOfDayHeatmap')){
+    heatmapCard = `
+      <div class="chart-card" data-vis-id="chart-timeOfDayHeatmap">
+        <div class="chart-card-header">
+          <span class="chart-card-title">Was tritt wann auf?</span>
+        </div>
+        <p class="chart-card-subtitle">Je dunkler die Zelle, desto häufiger zu dieser Uhrzeit</p>
+        ${timeOfDayInsightHTML(todMatrix)}
+        ${heatmapLegendHTML(todMatrix)}
+        <div class="chart-scroll-x">${timeOfDayHeatmapSVG(todMatrix)}</div>
+      </div>
+    `;
+  }
+
+  return `<div class="chart-view-scroll">${periodCard}${cycleCard}${cycleTrendCard}${hourlyCard}${heatmapCard}${painPhaseCard}${painTimeCard}${symptomsPhaseCard}${moodsPhaseCard}</div>`;
 }
 
 export function renderChartView(){

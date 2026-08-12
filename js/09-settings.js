@@ -1,9 +1,9 @@
 import { deleteCustomItem, exportAllData, importAllData, loadCustomItems, loadDayLogs, loadPeriods, loadSettings, renameCustomItem, saveSettings } from './01-storage.js';
 import { State, applyColorScheme, applyThemePreset, hideItem, isItemHidden, moodCatalog, showItem, symptomCatalog } from './02-state-theme.js';
-import { addDays, average, computeChartData, computeItemFrequency, computePainStats, computePhaseOccurrenceStats, daysBetween, escapeAttr, formatISODate, generateEarthyTheme, parseISODate, topItemsFromCounts } from './03-utils.js';
+import { addDays, average, computeChartData, computeItemFrequency, computePainStats, computePhaseOccurrenceStats, computeTimeOfDayMatrix, daysBetween, escapeAttr, formatISODate, generateEarthyTheme, parseISODate, topItemsFromCounts } from './03-utils.js';
 import { pushView } from './05-navigation.js';
 import { goImport } from './06-import.js';
-import { barChartSVG, categoryBarChartSVG, fmtDateShort, fmtDaysAvg } from './07-chart.js';
+import { barChartSVG, categoryBarChartSVG, fmtDateShort, fmtDaysAvg, fmtHour, hourlyAreaSVG, timeOfDayHeatmapSVG } from './07-chart.js';
 import { fmtDateReadable } from './08-stats-progress.js';
 import { APP_DATA } from './data/app-data.js';
 
@@ -375,6 +375,22 @@ function buildReportHTML(fromISO, toISO){
     `;
   }
 
+  // Tagesverlauf im Bericht: dieselbe Heatmap/Verteilung wie im Chart-Tab
+  // (computeTimeOfDayMatrix(), 03-utils.js), aber nur ueber die Tage im
+  // gewaehlten Zeitraum.
+  let timeOfDaySection = '';
+  const rangeTodMatrix = computeTimeOfDayMatrix(rangeDayLogs, symptomCatalog(), moodCatalog());
+  if (rangeTodMatrix.totalEntries){
+    const peakHour = rangeTodMatrix.hourTotals.indexOf(Math.max(...rangeTodMatrix.hourTotals));
+    timeOfDaySection = `
+      <h2>Tagesverlauf</h2>
+      <p class="report-meta">${rangeTodMatrix.totalEntries} Eintr\u00e4ge mit Uhrzeit · Schwerpunkt gegen ${fmtHour(peakHour)}</p>
+      ${hourlyAreaSVG(rangeTodMatrix.hourTotals)}
+      <h2>Was tritt wann auf?</h2>
+      ${timeOfDayHeatmapSVG(rangeTodMatrix)}
+    `;
+  }
+
   let symptomMoodSection = '';
   const symptomCounts = topItemsFromCounts(computeItemFrequency(rangeDayLogs, 'symptoms'), symptomCatalog(), 8);
   const moodCounts = topItemsFromCounts(computeItemFrequency(rangeDayLogs, 'moods'), moodCatalog(), 8);
@@ -415,6 +431,8 @@ function buildReportHTML(fromISO, toISO){
     ${cycleChart}
 
     ${painSection}
+
+    ${timeOfDaySection}
 
     ${symptomMoodSection}
 

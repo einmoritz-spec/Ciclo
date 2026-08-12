@@ -582,6 +582,103 @@ export function computePainStats(periods, dayLogsArray){
   return { entries, totalCount: entries.length, avgIntensity, byTimeOfDay };
 }
 
+/* ---------------------------------------------------
+   Tagesverlauf-Auswertung
+   Nutzt die automatisch erfassten Uhrzeiten (loggedAt, siehe nowStamp() in
+   01-storage.js) aller Schmerz-/Symptom-/Stimmungs-Eintraege, um zu zeigen,
+   zu WELCHER TAGESZEIT welche Beschwerde typischerweise auftritt — die
+   bisherigen Auswertungen betrachteten nur Zyklusphase und Gesamthaeufigkeit,
+   nicht den Tagesrhythmus.
+--------------------------------------------------- */
+
+/** Stunde (0-23) aus einem loggedAt-Zeitstempel in LOKALER Zeit. null, wenn
+    kein Zeitstempel vorliegt (sehr alte, migrierte Eintraege) — solche
+    Eintraege werden in der Tagesverlauf-Auswertung uebersprungen statt
+    faelschlich auf 00:00 gelegt zu werden. */
+function loggedHour(loggedAt){
+  if (!loggedAt) return null;
+  const d = new Date(loggedAt);
+  return Number.isNaN(d.getTime()) ? null : d.getHours();
+}
+
+/** Baut die Datengrundlage fuer die Tagesverlauf-Heatmap: je Kategorie eine
+    Zeile mit 24 Stunden-Zellen (Anzahl Eintraege in dieser Stunde ueber den
+    GESAMTEN erfassten Zeitraum). Fuehrt Schmerz-Kategorien, Symptome und
+    Stimmungen in EINER Auswertung zusammen, da die interessante Frage
+    ("wann tritt was auf?") kategorieuebergreifend ist.
+    Rueckgabe: { rows: [{ id, label, kind, hours: number[24], total }],
+                hourTotals: number[24], maxCell, totalEntries }
+    kind ist 'pain' | 'symptom' | 'mood' — die Chart-Schicht faerbt danach ein.
+    Zeilen ohne einen einzigen Eintrag mit Uhrzeit werden weggelassen. */
+export function computeTimeOfDayMatrix(dayLogsArray, symptomCatalogList, moodCatalogList){
+  const rowMap = new Map();
+
+  const ensureRow = (id, label, kind) => {
+    const key = kind + ':' + id;
+    if (!rowMap.has(key)){
+      rowMap.set(key, { id, label, kind, hours: new Array(24).fill(0) });
+    }
+    return rowMap.get(key);
+  };
+
+  dayLogsArray.forEach(day => {
+    (day.pain || []).forEach(p => {
+      const hour = loggedHour(p.loggedAt);
+      if (hour === null) return;
+      const cat = APP_DATA.PAIN_CATEGORIES.find(c => c.id === p.category);
+      const label = cat ? cat.label : 'Schmerz (allgemein)';
+      ensureRow(p.category || '_generic', label, 'pain').hours[hour] += 1;
+    });
+    (day.symptoms || []).forEach(s => {
+      const hour = loggedHour(s.loggedAt);
+      if (hour === null) return;
+      const item = symptomCatalogList.find(c => c.id === s.catalogId);
+      ensureRow(s.catalogId, item ? item.label : s.catalogId, 'symptom').hours[hour] += 1;
+    });
+    (day.moods || []).forEach(m => {
+      const hour = loggedHour(m.loggedAt);
+      if (hour === null) return;
+      const item = moodCatalogList.find(c => c.id === m.catalogId);
+      ensureRow(m.catalogId, item ? item.label : m.catalogId, 'mood').hours[hour] += 1;
+    });
+  });
+
+  const rows = Array.from(rowMap.values())
+    .map(r => ({ ...r, total: r.hours.reduce((a, b) => a + b, 0) }))
+    .filter(r => r.total > 0)
+    // Haeufigste zuerst; innerhalb gleicher Haeufigkeit nach Art gruppiert,
+    // damit Schmerz/Symptom/Stimmung nicht wild durcheinander stehen.
+    .sort((a, b) => b.total - a.total || a.kind.localeCompare(b.kind));
+
+  const hourTotals = new Array(24).fill(0);
+  rows.forEach(r => r.hours.forEach((v, h) => { hourTotals[h] += v; }));
+
+  const maxCell = rows.reduce((max, r) => Math.max(max, ...r.hours), 0);
+  const totalEntries = hourTotals.reduce((a, b) => a + b, 0);
+
+  return { rows, hourTotals, maxCell, totalEntries };
+}
+
+/** Kuerzeste sinnvolle Beschreibung, WANN eine Kategorie typischerweise
+    auftritt — nutzt den "Schwerpunkt" (die Stunde, um die sich die meisten
+    Eintraege sammeln) statt eines einfachen Maximums, damit z.B. zwei
+    benachbarte Stunden mit je 3 Eintraegen nicht von einer einzelnen Stunde
+    mit 4 verdraengt werden. Rueckgabe: { peakHour, share } — share ist der
+    Anteil der Eintraege im 3-Stunden-Fenster um peakHour (0-1), also ein Mass
+    dafuer, wie stark gebuendelt die Kategorie auftritt. */
+export function computePeakWindow(hours){
+  const total = hours.reduce((a, b) => a + b, 0);
+  if (!total) return null;
+  let bestHour = 0;
+  let bestSum = -1;
+  for (let h = 0; h < 24; h++){
+    // 3-Stunden-Fenster, zyklisch ueber Mitternacht hinweg
+    const sum = hours[(h + 23) % 24] + hours[h] + hours[(h + 1) % 24];
+    if (sum > bestSum){ bestSum = sum; bestHour = h; }
+  }
+  return { peakHour: bestHour, share: bestSum / total };
+}
+
 /** Zählt, wie oft jede Symptom-/Stimmungs-catalogId über alle Tages-Logs
     hinweg vorkommt (catalogId -> Anzahl Vorkommen). Da mehrere Vorkommen pro
     Tag erlaubt sind (siehe addSymptomOccurrence()/addMoodOccurrence() in
