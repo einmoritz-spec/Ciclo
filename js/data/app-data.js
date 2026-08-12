@@ -338,6 +338,8 @@ export const APP_DATA = {
         { id: 'chart-periodLength', label: 'Periodendauer-Diagramm (Chart)' },
         { id: 'chart-cycleLength', label: 'Zykluslängen-Diagramm (Chart)' },
         { id: 'chart-cycleTrend', label: 'Zykluslängen-Trend (Chart)' },
+        { id: 'chart-hourlyTotals', label: 'Tagesverlauf gesamt (Chart)' },
+        { id: 'chart-timeOfDayHeatmap', label: 'Was-tritt-wann-auf-Heatmap (Chart)' },
         { id: 'chart-painPhase', label: 'Schmerzen-nach-Phase-Diagramm (Chart)' },
         { id: 'chart-painTimeOfDay', label: 'Schmerzen-nach-Tageszeit-Diagramm (Chart)' },
         { id: 'chart-symptomsByPhase', label: 'Symptome-nach-Phase-Diagramm (Chart)' },
