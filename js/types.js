@@ -140,6 +140,7 @@
  * @property {Date} [fertileEnd]
  * @property {number} [currentCycleDay]
  * @property {string} [currentPhase]
+ * @property {Date[]} [predictedPeriodStarts]
  * @property {{iso: string, intensity: number}[]} [predictedPeriodDays]
  */
 

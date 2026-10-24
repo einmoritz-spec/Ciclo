@@ -380,15 +380,49 @@ export function computeCycleStats(periods, today){
   // aufbläht statt eine sinnvolle Vorhersage zu bleiben. intensity 1 = wahr-
   // scheinlichster Tag (durchgezogener Ring), sonst gestrichelter Ring. Nur
   // heutige/zukünftige Tage werden aufgenommen.
+  //
+  // Mehrere Zyklen im Voraus: ab dem letzten Periodenstart wird Zyklus für Zyklus
+  // (Start = lastPeriodStart + k * avgCycleLength) bis PREDICTION_HORIZON_MONTHS
+  // Monate nach heute weitergerechnet. Überfällige Vorhersage: ist das Fenster
+  // des nächsten Zyklus schon vorbei, ohne dass eine neue Periode eingetragen
+  // wurde, verschwindet die Vorhersage nicht mehr, sondern
+  //  - bei einer Verspätung von höchstens einem Zyklus wird der erwartete Start auf
+  //    HEUTE verschoben (Periode ist "überfällig"; Folgezyklen rechnen ab da weiter),
+  //  - bei einer längeren Pause (vermutlich Erfassungslücke) wird der Rhythmus in
+  //    ganzen Zyklen bis zum ersten Zyklus weitergeführt, der noch nicht vorbei ist.
   const predictedPeriodDays = [];
+  const predictedPeriodStarts = [];
+  let predictedNextStart = nextPeriodStart;
   if (nextPeriodStart){
     const stdDev = cleanedCycleLengths.length >= 2 ? stdDeviation(cleanedCycleLengths) : 0;
     const halfWidth = Math.min(7, Math.max(3, Math.round(stdDev)));
-    for (let offset = -halfWidth; offset <= halfWidth; offset++){
-      const iso = formatISODate(addDays(nextPeriodStart, offset));
-      if (iso < todayISO) continue;
-      predictedPeriodDays.push({ iso, intensity: offset === 0 ? 1 : 1 - Math.abs(offset) / halfWidth });
+
+    let firstStart = nextPeriodStart;
+    const daysOverdue = daysBetween(firstStart, today);
+    if (daysOverdue > halfWidth){
+      firstStart = daysOverdue <= avgCycleLength
+        ? today
+        : addDays(firstStart, Math.ceil((daysOverdue - halfWidth) / avgCycleLength) * avgCycleLength);
     }
+    predictedNextStart = firstStart;
+
+    const horizonEndISO = formatISODate(addDays(
+      new Date(today.getFullYear(), today.getMonth() + APP_DATA.CYCLE_DEFAULTS.PREDICTION_HORIZON_MONTHS, today.getDate()), 0));
+    const byIso = new Map();
+    for (let k = 0; k < 60; k++){
+      const start = addDays(firstStart, k * avgCycleLength);
+      if (formatISODate(addDays(start, -halfWidth)) > horizonEndISO) break;
+      predictedPeriodStarts.push(start);
+      for (let offset = -halfWidth; offset <= halfWidth; offset++){
+        const iso = formatISODate(addDays(start, offset));
+        if (iso < todayISO || iso > horizonEndISO) continue;
+        const intensity = offset === 0 ? 1 : 1 - Math.abs(offset) / halfWidth;
+        // Überlappen sich zwei Fenster (sehr kurze Zyklen), zählt der höhere Wert.
+        if (!byIso.has(iso) || byIso.get(iso) < intensity) byIso.set(iso, intensity);
+      }
+    }
+    byIso.forEach((intensity, iso) => predictedPeriodDays.push({ iso, intensity }));
+    predictedPeriodDays.sort((a, b) => a.iso.localeCompare(b.iso));
   }
 
   // Regelmäßigkeits-Score (0–100): übersetzt die Streuung der (bereinigten)
@@ -413,7 +447,8 @@ export function computeCycleStats(periods, today){
     avgPeriodLength,
     regularityScore,
     lastPeriodStart,
-    nextPeriodStart,
+    nextPeriodStart: predictedNextStart,
+    predictedPeriodStarts,
     ovulationDate,
     fertileStart,
     fertileEnd,

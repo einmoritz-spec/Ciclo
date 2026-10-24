@@ -163,6 +163,35 @@ describe('computeCycleStats', () => {
     expect(stats.currentCycleDay).toBe(3);
   });
 
+  it('sagt Perioden drei Monate im Voraus vorher', () => {
+    const periods = [period('2026-01-01', '2026-01-05'), period('2026-01-29', '2026-02-02')];
+    const stats = computeCycleStats(periods, new Date(2026, 1, 5));
+    // Zyklus 28 Tage: Starts 26.02., 26.03., 23.04. liegen innerhalb von 3 Monaten (bis 05.05.)
+    const starts = stats.predictedPeriodStarts.map(d => formatISODate(d));
+    expect(starts).toEqual(['2026-02-26', '2026-03-26', '2026-04-23']);
+    const peaks = stats.predictedPeriodDays.filter(d => d.intensity === 1).map(d => d.iso);
+    expect(peaks).toEqual(starts);
+    expect(stats.predictedPeriodDays.every(d => d.iso <= '2026-05-05')).toBe(true);
+  });
+
+  it('zeigt die Vorhersage weiter an, wenn die Periode überfällig ist', () => {
+    const periods = [period('2026-01-01', '2026-01-05'), period('2026-01-29', '2026-02-02')];
+    // Erwartet am 26.02. (Fenster ±3 bis 01.03.) — heute ist der 10.03., nichts eingetragen
+    const today = new Date(2026, 2, 10);
+    const stats = computeCycleStats(periods, today);
+    expect(stats.predictedPeriodDays.length).toBeGreaterThan(0);
+    expect(formatISODate(stats.nextPeriodStart)).toBe('2026-03-10');
+    expect(stats.predictedPeriodDays[0].iso).toBe('2026-03-10');
+    expect(stats.predictedPeriodDays.find(d => d.iso === '2026-03-10').intensity).toBe(1);
+  });
+
+  it('führt den Rhythmus nach einer langen Pause ohne Einträge in ganzen Zyklen weiter', () => {
+    const periods = [period('2026-01-01', '2026-01-05'), period('2026-01-29', '2026-02-02')];
+    const stats = computeCycleStats(periods, new Date(2026, 5, 1)); // > 1 Zyklus überfällig
+    expect(stats.predictedPeriodDays.length).toBeGreaterThan(0);
+    expect(stats.predictedPeriodDays[0].iso >= '2026-06-01').toBe(true);
+  });
+
   it('schließt eine erkannte Erfassungslücke aus dem Zykluslängen-Schnitt aus', () => {
     const periods = [
       period('2025-08-04', '2025-08-08'),

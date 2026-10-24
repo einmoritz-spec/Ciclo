@@ -40,6 +40,7 @@ export const APP_DATA = {
     AVERAGE_CYCLE_LENGTH: 28,   // Tage zwischen zwei Periodenstarts
     AVERAGE_PERIOD_LENGTH: 5,   // Tage Regelblutung
     LUTEAL_PHASE_LENGTH: 14,    // Tage zwischen Eisprung und nächster Periode
+    PREDICTION_HORIZON_MONTHS: 3, // So weit im Voraus werden Perioden vorhergesagt
     MAX_SELECTION_RANGE_DAYS: 12 // Max. Abstand für Drag/Klick-Bereichsauswahl
   },
 
