@@ -166,12 +166,12 @@ describe('computeCycleStats', () => {
   it('sagt Perioden drei Monate im Voraus vorher', () => {
     const periods = [period('2026-01-01', '2026-01-05'), period('2026-01-29', '2026-02-02')];
     const stats = computeCycleStats(periods, new Date(2026, 1, 5));
-    // Zyklus 28 Tage: Starts 26.02., 26.03., 23.04. liegen innerhalb von 3 Monaten (bis 05.05.)
+    // Heute 05.02. -> Horizont bis Ende Mai (Feb + 3 Folgemonate). Zyklus 28 Tage.
     const starts = stats.predictedPeriodStarts.map(d => formatISODate(d));
-    expect(starts).toEqual(['2026-02-26', '2026-03-26', '2026-04-23']);
+    expect(starts).toEqual(['2026-02-26', '2026-03-26', '2026-04-23', '2026-05-21']);
     const peaks = stats.predictedPeriodDays.filter(d => d.intensity === 1).map(d => d.iso);
     expect(peaks).toEqual(starts);
-    expect(stats.predictedPeriodDays.every(d => d.iso <= '2026-05-05')).toBe(true);
+    expect(stats.predictedPeriodDays.every(d => d.iso <= '2026-05-31')).toBe(true);
   });
 
   it('zeigt die Vorhersage weiter an, wenn die Periode überfällig ist', () => {

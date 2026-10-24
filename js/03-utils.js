@@ -406,8 +406,11 @@ export function computeCycleStats(periods, today){
     }
     predictedNextStart = firstStart;
 
-    const horizonEndISO = formatISODate(addDays(
-      new Date(today.getFullYear(), today.getMonth() + APP_DATA.CYCLE_DEFAULTS.PREDICTION_HORIZON_MONTHS, today.getDate()), 0));
+    // Horizont = Ende des N-ten Folgemonats (Tag 0 des Monats danach), nicht
+    // "heute + N Monate": so sind die kommenden N Kalendermonate immer komplett
+    // abgedeckt (heute 24.10. -> bis 31.01.).
+    const horizonEndISO = formatISODate(
+      new Date(today.getFullYear(), today.getMonth() + APP_DATA.CYCLE_DEFAULTS.PREDICTION_HORIZON_MONTHS + 1, 0));
     const byIso = new Map();
     for (let k = 0; k < 60; k++){
       const start = addDays(firstStart, k * avgCycleLength);
